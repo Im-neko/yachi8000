@@ -1,0 +1,87 @@
+import type { SpeechPriority } from './speech.ts';
+
+/** キューに載っている 1 文。同一性で「取り出す予定だった文」を識別する。 */
+export interface QueuedSentence {
+  readonly priority: SpeechPriority;
+  /** 投入順。優先度が同じならこの順に読む（「たまたま速かった方が先」にしない）。 */
+  readonly seq: number;
+  readonly text: string;
+}
+
+export interface SpeechRequest {
+  readonly priority: SpeechPriority;
+  readonly sentences: readonly string[];
+}
+
+export interface SpeechQueue {
+  /** 載せられたら true。上限を超えて破棄したら false（呼び出し側が WARN を出す）。 */
+  enqueue(request: SpeechRequest): boolean;
+  /** 次に読む 1 文を取り出す。 */
+  take(): QueuedSentence | undefined;
+  /** 次に読む 1 文を覗く。`take()` と同じオブジェクトを返す。 */
+  peek(): QueuedSentence | undefined;
+  /** 残りを全部捨てて、捨てた数を返す。 */
+  clear(): number;
+  size(): number;
+}
+
+/**
+ * 優先度付き再生キュー（F-17, INV-5）。
+ *
+ * 通知は会話の応答より先に出る。ただし**再生中の文は切らない**（Q-05 → (b)）。
+ * 再生ループが 1 文ずつ取り出すので、割り込みは「次の文を通知に譲る」形で
+ * 自然に実現される。追加の打ち切り機構は要らない。
+ *
+ * 短時間に通知が殺到した場合は**全部読む**（Q-06）。ただし無制限に積むと
+ * 数時間分の読み上げが溜まるので上限を設け、超えた分は破棄する。
+ * 破棄は黙って行わない（呼び出し側が WARN を出す）。
+ */
+export function createSpeechQueue(capacity: number): SpeechQueue {
+  const buckets: Record<SpeechPriority, QueuedSentence[]> = {
+    notification: [],
+    reply: [],
+  };
+  let nextSeq = 0;
+
+  function size(): number {
+    return buckets.notification.length + buckets.reply.length;
+  }
+
+  function head(): QueuedSentence | undefined {
+    return buckets.notification[0] ?? buckets.reply[0];
+  }
+
+  return {
+    enqueue(request) {
+      if (request.sentences.length === 0) return true;
+      if (size() + request.sentences.length > capacity) return false;
+
+      const seq = nextSeq++;
+      for (const text of request.sentences) {
+        buckets[request.priority].push({
+          priority: request.priority,
+          seq,
+          text,
+        });
+      }
+      return true;
+    },
+
+    take() {
+      const bucket =
+        buckets.notification.length > 0 ? buckets.notification : buckets.reply;
+      return bucket.shift();
+    },
+
+    peek: head,
+
+    clear() {
+      const dropped = size();
+      buckets.notification.length = 0;
+      buckets.reply.length = 0;
+      return dropped;
+    },
+
+    size,
+  };
+}

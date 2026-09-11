@@ -1,0 +1,43 @@
+# 開発時の依存サービス。
+#
+# agent 本体は `cd agent && npm run dev` で動かす（HMR を効かせたいため）。
+# アバター表示はフェーズ 6 で足す。
+services:
+  memory-db:
+    # 長期記憶（F-30）。運用時は k8s 上の専用 Deployment + 専用 PVC で、
+    # 既存の共用 Postgres には相乗りしない（D-20）。
+    image: pgvector/pgvector:0.8.6-pg18
+    environment:
+      POSTGRES_USER: yachi8000
+      POSTGRES_PASSWORD: yachi8000
+      POSTGRES_DB: yachi8000
+    ports:
+      - '5432:5432'
+    volumes:
+      # PG18 のイメージはマウント先を /var/lib/postgresql に置くことを前提にしている
+      # （データは配下の subdirectory に入る）。/var/lib/postgresql/data へ直接
+      # マウントすると「unused mount/volume」と判断されて起動しない。
+      # k8s の PVC でも同じマウント先にすること。
+      - memory-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U yachi8000 -d yachi8000']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  voicevox:
+    # 音声合成エンジン（F-12）。運用時は k8s 上の別 Deployment で、
+    # yachi8000 には接続情報（VOICEVOX_URL）だけを渡す（D-05）。
+    # 運用者がエンジンを差し替えられることが要件なので、agent 側は
+    # このサービス名にも既定の話者にも依存しない。
+    image: voicevox/voicevox_engine:cpu-latest
+    ports:
+      - '50021:50021'
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:50021/version || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  memory-db-data:

@@ -1,0 +1,83 @@
+name: Build, Push and Deploy (agent)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent/**"
+      - ".github/workflows/build-and-deploy.yml"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # このリポジトリは public なので、レジストリのプロジェクト ID と
+      # GitOps リポジトリ名は値ごとシークレットに置く（リポジトリには書かない）。
+      # IMAGE_REPOSITORY: イメージの完全なパス
+      # GITOPS_REPO:      <owner>/<name>
+      IMAGE: ${{ secrets.IMAGE_REPOSITORY }}
+      GITOPS_REPO: ${{ secrets.GITOPS_REPO }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GOOGLE_CREDENTIALS }}
+
+      - name: Configure docker for Artifact Registry
+        run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
+
+      # タグは 2 つ打つ。:latest だけだと再ビルドで前のイメージが dangling に
+      # なり、prune で消えて「1 つ前へ戻す」ができなくなる。
+      - name: Build and push docker image
+        run: |
+          TAG="${GITHUB_SHA::7}"
+          docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:latest"
+
+      - name: Open an image tag bump PR against the GitOps repository
+        env:
+          SSH_KEY: ${{ secrets.GITOPS_DEPLOY_KEY }}
+          GH_TOKEN: ${{ secrets.GITOPS_PR_TOKEN }}
+        run: |
+          TAG="${GITHUB_SHA::7}"
+          BRANCH="yachi8000-image-$TAG"
+
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
+
+          rm -rf /tmp/gitops
+          git clone "git@github.com:${GITOPS_REPO}.git" /tmp/gitops
+          cd /tmp/gitops
+          git checkout -b "$BRANCH"
+
+          # sed ではなく yq。values.yaml には `tag:` が 3 つある
+          # （agent・VOICEVOX・pgvector）ので、行頭一致の sed は最初に当たった
+          # ものを書き換えてしまう。yq は snap ではなくリリースバイナリを入れる
+          # こと。snap 版は strict confinement で /tmp が見えず、しかも
+          # `snap install` 自体は成功を報告する。
+          sudo curl -sSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq -i ".image.tag = \"$TAG\"" helm-charts/yachi8000/values.yaml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm-charts/yachi8000/values.yaml
+          git commit -m "chore(yachi8000): イメージタグを $TAG に更新"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --repo "$GITOPS_REPO" \
+            --title "chore(yachi8000): update image to $TAG" \
+            --body "Automated image tag bump from yachi8000@${GITHUB_SHA}" \
+            --base master \
+            --head "$BRANCH"

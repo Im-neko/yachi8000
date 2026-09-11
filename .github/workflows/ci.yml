@@ -1,0 +1,44 @@
+name: CI (agent)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "agent/**"
+      - ".github/workflows/ci.yml"
+
+defaults:
+  run:
+    working-directory: agent
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19"
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      # @discordjs/opus has no prebuild for this glibc, so npm ci builds it
+      # from source. python3/make/g++ are already on ubuntu-latest.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      # Biome plus the layering check (domain -> nothing, application -> domain
+      # only, interfaces -> not infrastructure).
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
