@@ -7,12 +7,24 @@ import {
   MessageFlags,
   SlashCommandBuilder,
 } from 'discord.js';
+import type { PersonaDependencies } from '../../application/persona.ts';
+import type { SkillDependencies } from '../../application/skill.ts';
 import {
   joinVoice,
   leaveVoice,
   type VoiceSessionDependencies,
 } from '../../application/voice-session.ts';
 import { logger } from '../../observability/logger.ts';
+import {
+  handlePersonaAutocomplete,
+  handlePersonaCommand,
+  PERSONA_COMMAND,
+} from './persona-commands.ts';
+import {
+  handleSkillAutocomplete,
+  handleSkillCommand,
+  SKILL_COMMAND,
+} from './skill-commands.ts';
 
 /**
  * ギルド単位で登録する（F-11）。
@@ -37,6 +49,8 @@ const COMMANDS = [
     .setName('vc-leave')
     .setDescription('ボイスチャンネルから退出します')
     .toJSON(),
+  SKILL_COMMAND,
+  PERSONA_COMMAND,
 ];
 
 async function register(guild: Guild): Promise<void> {
@@ -95,22 +109,59 @@ async function handleLeave(
   });
 }
 
+export interface SlashCommandDependencies {
+  voice: VoiceSessionDependencies;
+  skills: SkillDependencies;
+  persona: PersonaDependencies;
+}
+
+/** コマンド名から、そのコマンドを捌く関数を引く。 */
+function routeCommand(
+  interaction: ChatInputCommandInteraction,
+  deps: SlashCommandDependencies,
+): Promise<void> | undefined {
+  switch (interaction.commandName) {
+    case 'vc-join':
+      return handleJoin(interaction, deps.voice);
+    case 'vc-leave':
+      return handleLeave(interaction, deps.voice);
+    case 'skill':
+      return handleSkillCommand(interaction, deps.skills);
+    case 'persona':
+      return handlePersonaCommand(interaction, deps.persona);
+    default:
+      return undefined;
+  }
+}
+
 export async function registerSlashCommands(
   client: Client<true>,
-  deps: VoiceSessionDependencies,
+  deps: SlashCommandDependencies,
 ): Promise<void> {
   client.on(Events.InteractionCreate, (interaction) => {
+    if (interaction.isAutocomplete()) {
+      const responding =
+        interaction.commandName === 'skill'
+          ? handleSkillAutocomplete(interaction, deps.skills)
+          : interaction.commandName === 'persona'
+            ? handlePersonaAutocomplete(interaction, deps.persona)
+            : undefined;
+      // 補完に失敗しても操作は続けられる（手で ID を貼れる）。落とさない。
+      responding?.catch((error) => {
+        logger.warn(
+          { err: error, command: interaction.commandName },
+          'Autocomplete failed',
+        );
+      });
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
-    const handler =
-      interaction.commandName === 'vc-join'
-        ? handleJoin
-        : interaction.commandName === 'vc-leave'
-          ? handleLeave
-          : undefined;
-    if (!handler) return;
+    const handling = routeCommand(interaction, deps);
+    if (!handling) return;
 
-    handler(interaction, deps).catch(async (error) => {
+    handling.catch(async (error) => {
       logger.error(
         { err: error, command: interaction.commandName },
         'Slash command failed',

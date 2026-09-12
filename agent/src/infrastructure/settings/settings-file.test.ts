@@ -17,6 +17,7 @@ notification:
   whenNotInVoice: drop
 behavior:
   personaLock: false
+  reminderPollIntervalSeconds: 30
 `;
 
 describe('parseSettingsYaml', () => {
@@ -67,6 +68,25 @@ describe('parseSettingsYaml', () => {
     expect(() =>
       parseSettingsYaml(
         valid.replace('personaLock: false', 'personaLock: いいえ'),
+      ),
+    ).toThrow(/検証に失敗/);
+  });
+
+  it('リマインダーのポーリング間隔は 5 秒以上の整数', () => {
+    expect(() =>
+      parseSettingsYaml(
+        valid.replace(
+          'reminderPollIntervalSeconds: 30',
+          'reminderPollIntervalSeconds: 1',
+        ),
+      ),
+    ).toThrow(/検証に失敗/);
+    expect(() =>
+      parseSettingsYaml(
+        valid.replace(
+          'reminderPollIntervalSeconds: 30',
+          'reminderPollIntervalSeconds: 30.5',
+        ),
       ),
     ).toThrow(/検証に失敗/);
   });

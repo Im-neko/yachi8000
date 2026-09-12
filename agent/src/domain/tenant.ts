@@ -31,3 +31,38 @@ export function discordDirectMessageTenantId(userId: string): TenantId {
   assertSnowflake(userId, 'userId');
   return `discord-dm-${userId}` as TenantId;
 }
+
+/**
+ * キュレーターエージェント（F-40）のインスタンス ID の接頭辞。
+ *
+ * メインエージェントと**確実に別アドレス**になるように明示的に付ける。
+ * 先行実装は `skill-curator:<tenantId>` だったが（→ C-07）、`:` は Flue の
+ * 識別子で名前空間の区切りとして予約されているため、ここでは `-` を使う。
+ */
+const SKILL_CURATOR_PREFIX = 'skill-curator-';
+
+export function skillCuratorInstanceId(tenantId: TenantId): string {
+  return `${SKILL_CURATOR_PREFIX}${tenantId}`;
+}
+
+/**
+ * キュレーターのインスタンス ID からテナントを復元する。
+ *
+ * キュレーターは自分がどのテナントを見ているかを知る必要があるが、
+ * `initialData` はインスタンスを作った送信でしか効かない。ID から引く形に
+ * すれば、何ターン後の dispatch でも同じ答えになる。
+ */
+export function tenantIdOfSkillCurator(instanceId: string): TenantId {
+  if (!instanceId.startsWith(SKILL_CURATOR_PREFIX)) {
+    throw new Error(
+      `キュレーターのインスタンス ID ではありません: ${instanceId}`,
+    );
+  }
+  const tenantId = instanceId.slice(SKILL_CURATOR_PREFIX.length);
+  if (tenantId === '') {
+    throw new Error(
+      `キュレーターのインスタンス ID にテナントがありません: ${instanceId}`,
+    );
+  }
+  return tenantId as TenantId;
+}

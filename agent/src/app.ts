@@ -1,6 +1,14 @@
 import { setProvider } from '@flue/runtime';
 import { Hono } from 'hono';
-import { createVoiceRuntime, memoryStore } from './composition-root.ts';
+import type { ReminderDeliveryDependencies } from './application/reminder.ts';
+import { fireDueReminders } from './application/reminder.ts';
+import {
+  createVoiceRuntime,
+  memoryStore,
+  personaDependencies,
+  settingsProvider,
+  skillDependencies,
+} from './composition-root.ts';
 import { env } from './config/env.ts';
 import { startDiscordGateway } from './infrastructure/discord/gateway.ts';
 import { createLlmProxyProvider } from './infrastructure/llm/provider.ts';
@@ -39,7 +47,47 @@ registerMessageHandler(client, {
   speech: voice.speech,
   voice: voice.voiceSession,
 });
-await registerSlashCommands(client, voice.voiceSession);
+await registerSlashCommands(client, {
+  voice: voice.voiceSession,
+  skills: skillDependencies,
+  persona: personaDependencies,
+});
+
+/**
+ * リマインダーの poller（F-31）。
+ *
+ * `setInterval` ではなく 1 回ごとに次を仕込む。**間隔は設定ファイルから毎回
+ * 読み直す**ので、書き換えれば次の確認から効く（再起動が要らない）。
+ * 起動時に期限が過ぎているものは、最初の確認でまとめて発火する —— 止まって
+ * いた間のリマインダーを黙って捨てない。
+ */
+function startReminderPoller(deps: ReminderDeliveryDependencies): void {
+  async function tick(): Promise<void> {
+    try {
+      const fired = await fireDueReminders(deps, new Date());
+      if (fired > 0) logger.debug({ fired }, 'Reminder poll fired reminders');
+    } catch (error) {
+      // 1 回の失敗でループを止めない。止まると以後すべてのリマインダーが
+      // 黙って鳴らなくなる（気付けない壊れ方）。
+      logger.error({ err: error }, 'Reminder poll failed');
+    } finally {
+      const seconds =
+        settingsProvider.get().behavior.reminderPollIntervalSeconds;
+      setTimeout(() => void tick(), seconds * 1000).unref();
+    }
+  }
+
+  void tick();
+  logger.info(
+    {
+      intervalSeconds:
+        settingsProvider.get().behavior.reminderPollIntervalSeconds,
+    },
+    'Started the reminder poller',
+  );
+}
+
+startReminderPoller(voice.reminder);
 
 const app = new Hono();
 app.get('/api/v1/health', (c) => c.json({ status: 'ok' }));

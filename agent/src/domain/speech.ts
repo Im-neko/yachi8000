@@ -1,5 +1,17 @@
-/** 発話の優先度（F-17）。通知は会話の応答より先に読む。 */
-export type SpeechPriority = 'notification' | 'reply';
+/**
+ * 発話の優先度（F-17, INV-5）。強い順に reminder → notification → reply。
+ *
+ * リマインダーが通知より先なのは、**利用者がその時刻を指定したから**。
+ * 外部通知は届いた時刻が送信元の都合で決まるので、譲る側になる（→ D-23）。
+ */
+export type SpeechPriority = 'reminder' | 'notification' | 'reply';
+
+/** 強い順。キューの取り出し順はこの配列が正典。 */
+export const SPEECH_PRIORITIES: readonly SpeechPriority[] = [
+  'reminder',
+  'notification',
+  'reply',
+];
 
 /**
  * 1 文の上限。VOICEVOX は長文もそのまま合成できるが、合成が終わるまで

@@ -16,6 +16,9 @@ const testDefaults: Record<string, string> = {
   MEMORY_DATABASE_URL: 'postgres://test:test@localhost:5432/test',
   VOICEVOX_URL: 'http://voicevox.test',
   NOTIFY_TOKENS: 'test-source:test-notify-token',
+  BRAVE_SEARCH_API_KEY: 'test-brave-key',
+  // ランタイム状態はテストごとにインメモリで作る。ファイルを触らせない。
+  APP_DB_PATH: ':memory:',
 };
 
 for (const [name, value] of Object.entries(testDefaults)) {

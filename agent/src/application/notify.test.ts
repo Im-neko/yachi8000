@@ -20,7 +20,7 @@ interface Harness {
 
 function createHarness(options: {
   connected: boolean;
-  rewrite?: () => Promise<string>;
+  rewrite?: (notification: Notification) => Promise<string>;
   send?: () => Promise<void>;
   notification?: Settings['notification'];
 }): Harness {
@@ -116,6 +116,38 @@ describe('notify', () => {
     await expect(notify(deps, NOTIFICATION)).resolves.toBe('dropped');
     expect(spoken).toEqual([]);
     expect(deps.log.warn).toHaveBeenCalledOnce();
+  });
+
+  it('role は書き換え役へそのまま渡し、縮退時の文面にも出す', async () => {
+    const handed: Notification[] = [];
+    const withRole: Notification = {
+      ...NOTIFICATION,
+      role: 'CI を直している人',
+    };
+
+    const { deps: ok, spoken } = createHarness({
+      connected: true,
+      rewrite: async (notification) => {
+        handed.push(notification);
+        return '書き換えた文';
+      },
+    });
+    await notify(ok, withRole);
+    expect(handed).toEqual([withRole]);
+    expect(spoken).toEqual(['書き換えた文']);
+
+    // 書き換えが落ちても「誰が」は消えない。並行して動く送信元を
+    // 区別できないと通知の意味がなくなる。
+    const { deps: degraded, spoken: fallback } = createHarness({
+      connected: true,
+      rewrite: async () => {
+        throw new Error('proxy is down');
+      },
+    });
+    await notify(degraded, withRole);
+    expect(fallback).toEqual([
+      'claude-code（CI を直している人） からのメッセージです。作業が完了しました。',
+    ]);
   });
 
   it('届けられなかった通知では受理時刻を進めない', async () => {

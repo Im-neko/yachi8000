@@ -29,6 +29,13 @@ export interface Settings {
   behavior: {
     /** 人格・口調固定モード（F-34）。 */
     personaLock: boolean;
+    /**
+     * リマインダーの期限を確認する間隔（秒）（F-31, F-60）。
+     *
+     * 発火の粒度がそのままこの値になる。短くすると細かく鳴るが、その分
+     * 空振りのクエリが増える。
+     */
+    reminderPollIntervalSeconds: number;
   };
 }
 

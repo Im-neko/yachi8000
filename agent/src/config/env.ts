@@ -85,10 +85,30 @@ const EnvSchema = v.object({
   /** 長期記憶（pgvector）の接続先。会話履歴用の SQLite とは別物。 */
   MEMORY_DATABASE_URL: v.pipe(v.string(), v.minLength(1)),
 
+  /**
+   * Web 検索（F-35）の Brave Search API キー。
+   *
+   * キーなしで引ける検索は実測で使えなかった（→ D-27）。検索できないまま
+   * 起動すると「調べて」に黙って答えられなくなるので、起動時に落とす。
+   */
+  BRAVE_SEARCH_API_KEY: v.pipe(v.string(), v.minLength(1)),
+
   /** Flue の会話履歴 SQLite。k8s では PVC 上のパスを渡す。 */
   FLUE_DB_PATH: v.optional(
     v.pipe(v.string(), v.minLength(1)),
     './data/flue.db',
+  ),
+
+  /**
+   * ランタイム状態（リマインダー・スキル・人格差分）の SQLite。
+   *
+   * **Flue の会話履歴 DB とは別ファイルにする**（→ D-24）。会話履歴は Flue が
+   * スキーマごと所有しているので相乗りしない。k8s では FLUE_DB_PATH と同じ
+   * PVC 上のパスを渡す —— **values で渡し忘れると Pod 再起動ごとに消える。**
+   */
+  APP_DB_PATH: v.optional(
+    v.pipe(v.string(), v.minLength(1)),
+    './data/yachi.db',
   ),
 
   /** 静的設定（F-60）の YAML。PVC 上に置き、設定 UI もここへ書く。 */
