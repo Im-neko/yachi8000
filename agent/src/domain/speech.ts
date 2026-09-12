@@ -14,6 +14,59 @@ export const SPEECH_PRIORITIES: readonly SpeechPriority[] = [
 ];
 
 /**
+ * 読み上げるときに URL の代わりに読む語。
+ *
+ * 消すだけにしないのは、「詳しくは https://… を見て」が「詳しくは を見て」に
+ * なると文として壊れるため。本文が URL だけのときも無音にならない。
+ */
+const URL_SPOKEN_AS = 'リンク';
+
+/**
+ * Markdown のリンクは**表示文字列だけ残す**。`[議事録](https://…)` は
+ * 「議事録」と読めば通じるので、`リンク` に潰すより情報が多い。
+ */
+const MARKDOWN_LINK = /\[([^\]\n]+)\]\((?:https?:\/\/|www\.)[^\s)]*\)/g;
+
+/** Discord が埋め込みを抑制するときの `<https://…>` 形式。 */
+const ANGLE_BRACKET_URL = /<(?:https?:\/\/|www\.)[^\s<>]*>/g;
+
+/**
+ * URL 本体。空白・山括弧・引用符・日本語の括弧は URL に含めない。
+ *
+ * **スキーム（または `www.`）が無いものは URL として扱わない。** `example.com`
+ * まで拾いにいくと `Node.js` や `v1.2` のような普通の語を巻き込む。読み落とす
+ * ほうが、読むべき語を消すより害が小さい。
+ */
+const URL = /(?:https?:\/\/|www\.)[^\s<>"'「」『』（）【】]*/g;
+
+/**
+ * URL の末尾に紛れ込みやすい記号。`https://example.com/。` の句点まで URL
+ * 扱いすると、文の切れ目（D-11）が消えてしまう。
+ */
+const TRAILING_PUNCTUATION = /[.,;:!?。、！？）)」』】]+$/;
+
+/**
+ * 読み上げからリンクを外す。
+ *
+ * URL を音にしても意味が取れないうえ、`https://example.com/a/b?c=d` のような
+ * 文字列は延々と続く。**テキスト側からは消さない** —— チャンネルへ出す文面で
+ * URL は押せる情報なので、これは読み上げ側だけの整形。
+ *
+ * LLM に書き換えさせないのは意図的。決定的な置換なので、リマインダーの
+ * 「保存した文面をそのまま読む」（D-08）とも衝突しない —— 言い換えではなく、
+ * 音にできないものを音にしないだけ。
+ */
+export function stripUrlsForSpeech(text: string): string {
+  return text
+    .replace(MARKDOWN_LINK, '$1')
+    .replace(ANGLE_BRACKET_URL, URL_SPOKEN_AS)
+    .replace(URL, (match) => {
+      const trailing = TRAILING_PUNCTUATION.exec(match)?.[0] ?? '';
+      return URL_SPOKEN_AS + trailing;
+    });
+}
+
+/**
  * 1 文の上限。VOICEVOX は長文もそのまま合成できるが、合成が終わるまで
  * 音が出ない。文が長いほど「最初の音まで」が延び、割り込み（F-17）の
  * 粒度も粗くなる。

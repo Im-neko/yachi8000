@@ -125,4 +125,21 @@ describe('createSpeechService', () => {
     expect(h.played).not.toContain('あふれた。');
     expect(h.service.pending()).toBe(199);
   });
+
+  it('URL は合成に渡さない（テキスト配信側には残る）', async () => {
+    const { service, synthesized } = createHarness();
+
+    service.speak({
+      text: 'PR を出しました。https://example.com/pr/1 を見てください。',
+      priority: 'notification',
+    });
+    await vi.waitFor(() => {
+      expect(synthesized.length).toBe(2);
+    });
+
+    expect(synthesized).toEqual([
+      'PR を出しました。',
+      'リンク を見てください。',
+    ]);
+  });
 });
