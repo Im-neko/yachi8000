@@ -1,4 +1,4 @@
-import type { SpeechPriority } from './speech.ts';
+import { SPEECH_PRIORITIES, type SpeechPriority } from './speech.ts';
 
 /** キューに載っている 1 文。同一性で「取り出す予定だった文」を識別する。 */
 export interface QueuedSentence {
@@ -28,7 +28,7 @@ export interface SpeechQueue {
 /**
  * 優先度付き再生キュー（F-17, INV-5）。
  *
- * 通知は会話の応答より先に出る。ただし**再生中の文は切らない**（Q-05 → (b)）。
+ * リマインダーと通知は会話の応答より先に出る。ただし**再生中の文は切らない**（Q-05 → (b)）。
  * 再生ループが 1 文ずつ取り出すので、割り込みは「次の文を通知に譲る」形で
  * 自然に実現される。追加の打ち切り機構は要らない。
  *
@@ -38,17 +38,24 @@ export interface SpeechQueue {
  */
 export function createSpeechQueue(capacity: number): SpeechQueue {
   const buckets: Record<SpeechPriority, QueuedSentence[]> = {
+    reminder: [],
     notification: [],
     reply: [],
   };
   let nextSeq = 0;
 
   function size(): number {
-    return buckets.notification.length + buckets.reply.length;
+    let total = 0;
+    for (const priority of SPEECH_PRIORITIES) total += buckets[priority].length;
+    return total;
   }
 
   function head(): QueuedSentence | undefined {
-    return buckets.notification[0] ?? buckets.reply[0];
+    for (const priority of SPEECH_PRIORITIES) {
+      const first = buckets[priority][0];
+      if (first) return first;
+    }
+    return undefined;
   }
 
   return {
@@ -68,17 +75,18 @@ export function createSpeechQueue(capacity: number): SpeechQueue {
     },
 
     take() {
-      const bucket =
-        buckets.notification.length > 0 ? buckets.notification : buckets.reply;
-      return bucket.shift();
+      for (const priority of SPEECH_PRIORITIES) {
+        const bucket = buckets[priority];
+        if (bucket.length > 0) return bucket.shift();
+      }
+      return undefined;
     },
 
     peek: head,
 
     clear() {
       const dropped = size();
-      buckets.notification.length = 0;
-      buckets.reply.length = 0;
+      for (const priority of SPEECH_PRIORITIES) buckets[priority].length = 0;
       return dropped;
     },
 

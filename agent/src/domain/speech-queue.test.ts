@@ -31,6 +31,22 @@ describe('createSpeechQueue', () => {
     expect(drain(queue)).toEqual(['N2', 'R1']);
   });
 
+  it('リマインダーは通知より先に読む（利用者が時刻を指定したもの）', () => {
+    const queue = createSpeechQueue(10);
+    queue.enqueue({ priority: 'reply', sentences: ['R1'] });
+    queue.enqueue({ priority: 'notification', sentences: ['N1'] });
+    queue.enqueue({ priority: 'reminder', sentences: ['M1'] });
+    expect(drain(queue)).toEqual(['M1', 'N1', 'R1']);
+  });
+
+  it('リマインダーの割り込みも再生中の 1 文は切らない', () => {
+    const queue = createSpeechQueue(10);
+    queue.enqueue({ priority: 'reply', sentences: ['R1', 'R2'] });
+    expect(queue.take()?.text).toBe('R1');
+    queue.enqueue({ priority: 'reminder', sentences: ['M1'] });
+    expect(drain(queue)).toEqual(['M1', 'R2']);
+  });
+
   it('上限を超える投入は丸ごと断る', () => {
     const queue = createSpeechQueue(3);
     expect(queue.enqueue({ priority: 'reply', sentences: ['A', 'B'] })).toBe(
@@ -50,9 +66,10 @@ describe('createSpeechQueue', () => {
 
   it('clear は残りを捨てて件数を返す', () => {
     const queue = createSpeechQueue(10);
+    queue.enqueue({ priority: 'reminder', sentences: ['M'] });
     queue.enqueue({ priority: 'notification', sentences: ['N'] });
     queue.enqueue({ priority: 'reply', sentences: ['R1', 'R2'] });
-    expect(queue.clear()).toBe(3);
+    expect(queue.clear()).toBe(4);
     expect(queue.size()).toBe(0);
   });
 });

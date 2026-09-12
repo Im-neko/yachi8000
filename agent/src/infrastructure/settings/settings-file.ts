@@ -28,6 +28,12 @@ const SettingsSchema = v.object({
   }),
   behavior: v.object({
     personaLock: v.boolean(),
+    reminderPollIntervalSeconds: v.pipe(
+      v.number(),
+      v.integer(),
+      v.minValue(5),
+      v.maxValue(3600),
+    ),
   }),
 });
 

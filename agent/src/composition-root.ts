@@ -2,20 +2,30 @@ import type { Client } from 'discord.js';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
 import type { PersonaDependencies } from './application/persona.ts';
+import type {
+  ReminderDeliveryDependencies,
+  ReminderDependencies,
+} from './application/reminder.ts';
+import type { SkillDependencies } from './application/skill.ts';
 import {
   createSpeechService,
   type SpeechService,
 } from './application/speech.ts';
 import type { VoiceSessionDependencies } from './application/voice-session.ts';
+import type { WebSearchDependencies } from './application/web-search.ts';
 import { env } from './config/env.ts';
 import type { SpeechSynthesizer } from './domain/ports/speech-synthesizer.ts';
+import { openAppDatabase } from './infrastructure/db/app-database.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
 import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.ts';
 import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
 import { createPgvectorMemoryStore } from './infrastructure/memory/pgvector-memory-store.ts';
-import { createEmptyPersonaDiffStore } from './infrastructure/persona/empty-persona-diff-store.ts';
+import { createSqlitePersonaDiffStore } from './infrastructure/persona/sqlite-persona-diff-store.ts';
+import { createSqliteReminderStore } from './infrastructure/reminder/sqlite-reminder-store.ts';
+import { createBraveSearcher } from './infrastructure/search/brave-search.ts';
 import { createSettingsFileProvider } from './infrastructure/settings/settings-file.ts';
+import { createSqliteSkillStore } from './infrastructure/skill/sqlite-skill-store.ts';
 import { createVoicevoxSynthesizer } from './infrastructure/voice/voicevox-synthesizer.ts';
 import { logger } from './observability/logger.ts';
 
@@ -24,10 +34,16 @@ import { logger } from './observability/logger.ts';
  * application のユースケースには port として渡す。
  *
  * app.ts と agents/ の両方から使う。`app.ts` は起動時の配線（スキーマ準備・
- * Discord 接続）を、`agents/` は 1 ターンの組み立てを担当する。
+ * Discord 接続・poller）を、`agents/` は 1 ターンの組み立てを担当する。
  */
 
 const settings = createSettingsFileProvider(env.SETTINGS_PATH);
+
+/**
+ * ランタイム状態の SQLite（→ D-24）。**Flue の会話履歴 DB とは別ファイル。**
+ * 会話履歴は Flue がスキーマごと所有している（永続化一覧の #1）。
+ */
+const appDb = openAppDatabase(env.APP_DB_PATH);
 
 const embedder = createProxyEmbedder({
   baseUrl: env.LLM_PROXY_BASE_URL,
@@ -43,7 +59,25 @@ export const memoryDependencies: MemoryDependencies = { store: memoryStore };
 
 export const personaDependencies: PersonaDependencies = {
   settings,
-  diffs: createEmptyPersonaDiffStore(),
+  diffs: createSqlitePersonaDiffStore(appDb),
+  log: logger,
+};
+
+export const skillDependencies: SkillDependencies = {
+  store: createSqliteSkillStore(appDb),
+  settings,
+  log: logger,
+};
+
+const reminderStore = createSqliteReminderStore(appDb);
+
+/** ツールが使う側（登録・一覧・削除）。配信は poller 側の配線で足す。 */
+export const reminderDependencies: ReminderDependencies = {
+  store: reminderStore,
+};
+
+export const webSearchDependencies: WebSearchDependencies = {
+  searcher: createBraveSearcher({ apiKey: env.BRAVE_SEARCH_API_KEY }),
 };
 
 /** 設定ファイルの現在値。表示整形（Discord 側）からも読む。 */
@@ -54,10 +88,12 @@ export interface VoiceRuntime {
   speech: SpeechService;
   voiceSession: VoiceSessionDependencies;
   notify: NotifyDependencies;
+  /** リマインダーの発火（F-31）。VC と Discord の Client に依存する。 */
+  reminder: ReminderDeliveryDependencies;
 }
 
 /**
- * 音声まわりの配線（F-11〜F-19）。
+ * 音声まわりの配線（F-11〜F-19）とリマインダーの配信（F-31）。
  *
  * Discord の Client に依存するので、Gateway が ready になってから
  * app.ts が呼ぶ。`speech` は 1 つだけ作る —— 発話の経路を増やすと
@@ -70,6 +106,7 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
   });
   const voice = createDiscordVoiceOutput(client);
   const speech = createSpeechService({ synthesizer, voice, log: logger });
+  const text = createDiscordTextNotifier(client);
 
   return {
     synthesizer,
@@ -84,8 +121,15 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
       }),
       speech,
       voice,
-      text: createDiscordTextNotifier(client),
+      text,
       settings,
+      log: logger,
+    },
+    reminder: {
+      store: reminderStore,
+      speech,
+      voice,
+      text,
       log: logger,
     },
   };

@@ -16,6 +16,8 @@ import { createNotifyAuthenticator, type NotifyToken } from './notify-auth.ts';
 
 /** 読み上げる本文の上限。これ以上は通知ではなく文書で、VC で流す意味がない。 */
 const MAX_BODY_LENGTH = 2000;
+/** 肩書きの上限。読み上げの冒頭に入るので、1 息で読める長さに抑える。 */
+const MAX_ROLE_LENGTH = 40;
 
 const NotifyRequestSchema = v.object({
   text: v.pipe(
@@ -23,6 +25,16 @@ const NotifyRequestSchema = v.object({
     v.trim(),
     v.minLength(1),
     v.maxLength(MAX_BODY_LENGTH),
+  ),
+  /**
+   * 送信元が何をしている人（プロセス）かの申告（F-15）。
+   *
+   * 並列に動かしていると「おわりました」だけでは何が終わったか分からない。
+   * ただしこれは**本文と同じ非信頼データ**で、`source` の代わりにはならない
+   * —— 送信元の同一性はトークンからしか決まらない（F-18）。
+   */
+  role: v.optional(
+    v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_ROLE_LENGTH)),
   ),
 });
 
@@ -74,6 +86,7 @@ export function createNotifyRouter(input: NotifyRoutesInput) {
     const disposition = await notify(input.notifyDependencies, {
       source,
       body: parsed.output.text,
+      role: parsed.output.role,
     });
     return c.json({ accepted: true, disposition }, 202);
   };

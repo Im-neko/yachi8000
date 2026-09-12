@@ -56,6 +56,8 @@ async function handleMessage(
       speakerId: message.author.id,
       speakerName: message.author.displayName,
       channelId: message.channelId,
+      // リマインダーの発火先を決めるのに使う（F-31）。DM には載らない。
+      ...(message.inGuild() ? { guildId: message.guildId } : {}),
     },
   };
 
