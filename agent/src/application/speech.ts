@@ -1,6 +1,10 @@
 import type { SpeechSynthesizer } from '../domain/ports/speech-synthesizer.ts';
 import type { VoiceOutput } from '../domain/ports/voice-output.ts';
-import { type SpeechPriority, splitIntoSentences } from '../domain/speech.ts';
+import {
+  type SpeechPriority,
+  splitIntoSentences,
+  stripUrlsForSpeech,
+} from '../domain/speech.ts';
 import {
   createSpeechQueue,
   type QueuedSentence,
@@ -120,7 +124,10 @@ export function createSpeechService(deps: SpeechDependencies): SpeechService {
 
   return {
     speak(input) {
-      const sentences = splitIntoSentences(input.text);
+      // URL を外すのはここだけ。入口が 1 本（INV-5）なので、会話の応答・
+      // 通知・リマインダーのどれから来ても素通りできない。テキスト配信は
+      // この経路を通らないので、チャンネルには URL が残る。
+      const sentences = splitIntoSentences(stripUrlsForSpeech(input.text));
       if (sentences.length === 0) return;
 
       if (!queue.enqueue({ priority: input.priority, sentences })) {
