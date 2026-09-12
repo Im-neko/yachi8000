@@ -4,17 +4,20 @@
 
 ## 開発ステータス
 
-**実装フェーズ・未リリース。フェーズ 3（外部通知）まで実装済みで、自宅 Kubernetes クラスタで稼働中（2026-09-11〜）。**
+**実装フェーズ・未リリース。フェーズ 3（外部通知）まで実装済みで、自宅 Kubernetes クラスタで稼働中（2026-09-11〜）。フェーズ 3.5・4 は実装済みだが未デプロイ・実機未確認。**
 
 | フェーズ | 内容 | 状態 |
 |---|---|---|
-| 1 | Discord テキスト対話（F-01, F-02, F-04, F-30, F-32, F-60） | 実装済み |
-| 2 | Discord 音声出力（F-11, F-12） | 実装済み |
-| 3 | 外部通知（F-15〜F-19） | 実装済み |
-| 4 | スキル自己改善 | 未着手 |
+| 1 | Discord テキスト対話（F-01, F-02, F-04, F-30, F-32, F-60） | 実装済み・稼働中 |
+| 2 | Discord 音声出力（F-11, F-12） | 実装済み・稼働中 |
+| 3 | 外部通知（F-15〜F-19） | 実装済み・稼働中 |
+| 3.5 | リマインダーと調べもの（F-31, F-35） | **実装済み・未デプロイ** |
+| 4 | スキル自己改善（F-40〜F-43, F-33, F-34） | **実装済み・未デプロイ** |
 | 5 | Slack 連携 | 未着手 |
 | 6 | アバター | 未着手 |
 | 7 | 音声入力 | 未着手 |
+
+**⚠ フェーズ 3.5・4 は次のデプロイまで動いていない。** さらに、**このまま deploy すると起動に失敗する** —— `BRAVE_SEARCH_API_KEY` が必須の環境変数なので、インフラ定義リポジトリ側の Sealed Secret と `APP_DB_PATH` の設定が先に要る（→ `docs/setup/deploy.md`）。
 
 要件の正典は引き続き `docs/requirements/`。実装は `agent/`。
 
@@ -37,6 +40,24 @@
 - **リサンプリングは要らない。** `/audio_query` の結果に `outputSamplingRate: 48000` と `outputStereo: true` を入れれば、エンジンが Discord と同じ形（48kHz / 2ch / 16bit）で返す。既存 `discord-vc` の `resamplePcm` は移植していない
 - 暗号化ライブラリは不要。Node 組み込みの `aes-256-gcm` で `@discordjs/voice` の要件を満たす（`generateDependencyReport()` で確認）。`@noble/ciphers` は xchacha20 側の純 JS フォールバックとして入れてある
 - **`AudioPlayer` の `noSubscriber` は `Stop` にする。** 既定の `Pause` は購読者がいないと Idle にならず、再生ループが永久に待つ
+
+### フェーズ 3.5・4 で確認済みのこと
+
+**実装は CI（typecheck / lint / test）を通っているが、デプロイしていない。** 以下は「実際に確かめた」ものだけを並べる。
+
+確かめたもの:
+
+- **Brave Search API は実キーで疎通済み。** 要約に `<strong>` タグと `&#x27;` のような文字参照が混じることを実測で確認した。**解かずに渡すと「アンパサンド・シャープ…」が声になる**（→ D-27）。`&amp;` は最後に戻す（先に戻すと `&amp;#39;` が二重に解釈される）
+- **キーなしの DuckDuckGo は使えない。** HTML 版は Cloudflare が **TLS 指紋**で弾いて HTTP 202 + 結果 0 件、公式 API は百科事典的要約だけで `Tokyo` すら空（実測）。指紋の偽装は検知回避にあたるので採らない（→ D-27）
+- **2 つ目のエージェントは `@flue/vite` が自動で見つける。** ビルド出力に `__flueBindAgentModule(SkillCurator, …)` が入ることを確認した。手で登録する必要はない
+- **`node:sqlite`（`DatabaseSync`）は Node 22.21 でフラグ無しに動く**（実験的機能の警告のみ）。Flue が内部で使っているものと同じで、**依存パッケージを 1 つも増やさずに済む**
+
+**まだ確かめていないもの（実機で最初に見るところ）**:
+
+- `/skill` `/persona` スラッシュコマンドが実機で登録・応答するか（権限ゲートを含む）
+- キュレーターが実際に返信後に発火し、まともなスキル候補を出すか。**応答レイテンシに影響しないか**
+- リマインダーがポーリングで発火し、登録チャンネルと VC の両方へ届くか
+- `persona` / `knowledge` の分類が実運用で分離できるか（→ Q-16 は**暫定決着**。分離できなければ D-26 を見直す）
 
 ## プロジェクト概要
 
@@ -90,11 +111,13 @@ house rule は `dev:development-principles` スキルに集約されている。
 
 | メソッド | パス | 認証 | 用途 |
 |---|---|---|---|
-| `POST` | `/api/v1/notify` | Bearer（`NOTIFY_TOKENS`） | 通知本文（`{"text": "..."}`）を受理する。読み上げ完了は待たず `202` を返す |
+| `POST` | `/api/v1/notify` | Bearer（`NOTIFY_TOKENS`） | 通知本文（`{"text": "...", "role": "..."}`。`role` は任意）を受理する。読み上げ完了は待たず `202` を返す |
 | `GET` | `/api/v1/voice/status` | 同上 | VC 接続状況と `lastNotifyAt`（**受理**時刻）。チャンネル ID が乗るので認証必須 |
 | `GET` | `/api/v1/health` | 不要 | 死活監視 |
 
 **送信元はトークンから決まる。** リクエスト本文に名乗らせない（名乗れると送信元を騙れる）。`NOTIFY_TOKENS` は `送信元:トークン` のカンマ区切り。
+
+**`role`（任意）は「送信元の中で何をしている人か」**（例: `CI を直している人`）。同じ送信元が並行して動いていると `おわりました` だけでは何が終わったのか分からないため（→ D-25）。**`role` は自己申告で検証しない。** 表示では `送信元（role）` の形にし、**トークン由来（騙れない）と本文由来（騙れる）を同じ見え方で混ぜない。**
 
 `DEBUG_MODE=true` のときだけ `/debug/chat` `/debug/vc-join` `/debug/vc-leave` が生える。**認証が無い**ので `ENVIRONMENT=production` との併用は起動時に拒否される。
 
@@ -106,13 +129,20 @@ agent/           Flue アプリ本体（TypeScript）
     domain/            モデル・値オブジェクト・port（interface）定義。外部依存なし
       ports/           application が使う interface。実装は infrastructure 側
     application/       ユースケース。port 越しにのみ外部を触る
-    infrastructure/    port の実装（LLM / 埋め込み / pgvector / 設定ファイル / 人格差分 / 音声合成 / Discord 接続）
+    infrastructure/    port の実装
+      db/              ランタイム状態の SQLite（リマインダー・スキル・人格差分。Flue の会話履歴 DB とは別ファイル → D-24）
       discord/         Gateway の接続そのもの・VC 出力・テキスト配信
+      llm/             会話・通知書き換えの LLM 呼び出し
+      memory/          長期記憶（pgvector）
+      persona/ reminder/ skill/  上記 SQLite 上の各ストア
+      search/          Brave Search API のクライアント（→ D-27）
+      settings/        設定ファイルの読み書き
       voice/           VOICEVOX 互換エンジンのクライアント
     interfaces/        入口と表示整形（discord/ = メッセージ処理とスラッシュコマンド、http/ = 通知 API とデバッグ用ルート）
     agents/            Flue の `'use agent'` エージェント定義と 1 ターンの実行
+      yachi.agent.ts     会話する本体
+      curator.agent.ts   スキル候補を出すキュレーター（返信確定後に fire-and-forget → F-40）
     tools/             Flue `useTool` 定義。application のユースケースを呼ぶ薄い層
-    skills/            スキルの永続化・動的マウント（フェーズ 4）
     config/            valibot による環境変数スキーマ
     observability/     ロガー
     composition-root.ts  infrastructure の具体実装を組み立てる場所
@@ -129,7 +159,7 @@ docs/
 
 **Flue の `agents/` `tools/` は層ではなくフレームワーク接触面**として扱う。ユースケースの実体は `application/` に置き、`tools/` はそれを呼ぶだけにする。合成ルートは `composition-root.ts`（何を組み立てるか）と `app.ts`（起動時に何を配線するか）に分かれている。
 
-ランタイム状態（会話履歴 SQLite・設定ファイル）は `agent/data/`（gitignore）。k8s では PVC 上のパスを `FLUE_DB_PATH` / `SETTINGS_PATH` で渡す。
+ランタイム状態（会話履歴 SQLite・ランタイム状態 SQLite・設定ファイル）は `agent/data/`（gitignore）。k8s では PVC 上のパスを `FLUE_DB_PATH` / **`APP_DB_PATH`** / `SETTINGS_PATH` で渡す。**`APP_DB_PATH` を渡し忘れると、リマインダー・スキル・人格差分が Pod 再起動ごとに黙って消える**（会話は普通に続くので気付きにくい → D-24）。
 
 ## 層の責務マッピング
 
@@ -204,7 +234,7 @@ TypeScript は strict（`noUncheckedIndexedAccess` を含む）。コマンド�
 
 **正典は `docs/requirements/04-architecture.md` の「永続化するもの一覧」。** ここには要点だけ。
 
-- **PVC 1 本に SQLite（会話履歴・スキル・人格差分・リマインダー）と設定ファイルと VRM を置く。** **長期記憶は専用 Postgres + pgvector**（`pgvector/pgvector:0.8.6-pg18`）で、別 Deployment + 専用 PVC（→ D-20）。**既存の共用 Postgres（EOL 済みの PG 12、他のアプリが相乗り）には触らない**
+- **PVC 1 本に SQLite 2 本（`FLUE_DB_PATH` = 会話履歴 / `APP_DB_PATH` = スキル・人格差分・リマインダー。→ D-24）と設定ファイルと VRM を置く。** **長期記憶は専用 Postgres + pgvector**（`pgvector/pgvector:0.8.6-pg18`）で、別 Deployment + 専用 PVC（→ D-20）。**既存の共用 Postgres（EOL 済みの PG 12、他のアプリが相乗り）には触らない**
 - **設定ファイルに ConfigMap を使わない。** 設定 UI が書き込むため（読み取り専用マウントで書けず、書けても再起動で戻る）
 - **PVC の中身は ArgoCD の管理外。** git push では復元されない。**クラスタ再構築時は設定ファイルと VRM を手で置き直す。PVC はバックアップ対象**
 - 音声バッファ・合成キャッシュは `emptyDir`（`sizeLimit` 付き）。**PVC には置かない**
