@@ -6,7 +6,10 @@ import type { TextNotifier } from '../domain/ports/text-notifier.ts';
 import type { VoiceOutput } from '../domain/ports/voice-output.ts';
 import {
   composeReminderText,
+  describeRecurrence,
+  nextOccurrence,
   parseJstDueAt,
+  type Recurrence,
   type Reminder,
 } from '../domain/reminder.ts';
 import type { TenantId } from '../domain/tenant.ts';
@@ -31,11 +34,48 @@ export interface ReminderDeliveryDependencies extends ReminderDependencies {
 }
 
 export interface ScheduleReminderRequest
-  extends Omit<ScheduleReminderInput, 'dueAt'> {
+  extends Omit<ScheduleReminderInput, 'dueAt' | 'recurrence'> {
   /** JST の `YYYY-MM-DDTHH:mm`。エージェントに渡している現在時刻と同じ形式。 */
   dueAtJst: string;
   /** 過去判定の基準。呼び出し側が渡す（テストで固定できるように）。 */
   now: Date;
+}
+
+export interface ScheduleRecurringReminderRequest
+  extends Omit<ScheduleReminderInput, 'dueAt' | 'recurrence'> {
+  recurrence: Recurrence;
+  /** 最初の回を決める基準。呼び出し側が渡す（テストで固定できるように）。 */
+  now: Date;
+}
+
+function normalizeTitle(title: string): string {
+  const trimmed = title.trim();
+  if (trimmed === '') {
+    throw new Error('リマインダーの内容が空です。');
+  }
+  return trimmed;
+}
+
+function normalizeDescription(
+  description: string | undefined,
+): string | undefined {
+  const trimmed = description?.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/**
+ * 積み上がりすぎていないかを見る。
+ *
+ * **繰り返しのリマインダーも同じ枠で数える。** 鳴っても消えないぶん、
+ * 上限に効かせておかないと際限なく溜まる。
+ */
+function ensureCapacity(deps: ReminderDependencies, tenantId: TenantId): void {
+  const pending = deps.store.listPending(tenantId);
+  if (pending.length >= MAX_PENDING_PER_TENANT) {
+    throw new Error(
+      `未発火のリマインダーが上限（${MAX_PENDING_PER_TENANT} 件）に達しています。先に不要なものを削除してください。`,
+    );
+  }
 }
 
 /**
@@ -48,10 +88,7 @@ export function scheduleReminder(
   deps: ReminderDependencies,
   request: ScheduleReminderRequest,
 ): Reminder {
-  const title = request.title.trim();
-  if (title === '') {
-    throw new Error('リマインダーの内容が空です。');
-  }
+  const title = normalizeTitle(request.title);
 
   const dueAt = parseJstDueAt(request.dueAtJst);
   if (new Date(dueAt).getTime() <= request.now.getTime()) {
@@ -60,19 +97,40 @@ export function scheduleReminder(
     );
   }
 
-  const pending = deps.store.listPending(request.tenantId);
-  if (pending.length >= MAX_PENDING_PER_TENANT) {
-    throw new Error(
-      `未発火のリマインダーが上限（${MAX_PENDING_PER_TENANT} 件）に達しています。先に不要なものを削除してください。`,
-    );
-  }
+  ensureCapacity(deps, request.tenantId);
 
-  const description = request.description?.trim();
   return deps.store.schedule({
     tenantId: request.tenantId,
     title,
-    description: description === '' ? undefined : description,
+    description: normalizeDescription(request.description),
     dueAt,
+    recurrence: undefined,
+    channelId: request.channelId,
+    guildId: request.guildId,
+    createdBy: request.createdBy,
+  });
+}
+
+/**
+ * 繰り返しのリマインダーを登録する（F-31, D-29）。
+ *
+ * 保存するのは**規則**で、最初の `dueAt` はそこから決める。以後は発火の
+ * たびにストアが次回へ進める。過去判定が要らないのは、`nextOccurrence` が
+ * 必ず `now` より後を返すため。
+ */
+export function scheduleRecurringReminder(
+  deps: ReminderDependencies,
+  request: ScheduleRecurringReminderRequest,
+): Reminder {
+  const title = normalizeTitle(request.title);
+  ensureCapacity(deps, request.tenantId);
+
+  return deps.store.schedule({
+    tenantId: request.tenantId,
+    title,
+    description: normalizeDescription(request.description),
+    dueAt: nextOccurrence(request.recurrence, request.now),
+    recurrence: request.recurrence,
     channelId: request.channelId,
     guildId: request.guildId,
     createdBy: request.createdBy,
@@ -114,6 +172,7 @@ export async function fireDueReminders(
 
   for (const reminder of due) {
     const text = composeReminderText(reminder);
+    warnOnSkippedOccurrences(deps, reminder, now);
 
     const inSameGuild =
       reminder.guildId !== undefined &&
@@ -148,4 +207,34 @@ export async function fireDueReminders(
   }
 
   return due.length;
+}
+
+/**
+ * 止まっていた間に過ぎた回を畳んだことを記録する（→ D-29, INV-7）。
+ *
+ * 繰り返しは `now` の次の回へ一気に進むので、3 日止まっていた毎日の
+ * リマインダーは 3 回ではなく 1 回だけ鳴る。**意図した部分縮退なので、
+ * WARN で残す。**
+ */
+function warnOnSkippedOccurrences(
+  deps: ReminderDeliveryDependencies,
+  reminder: Reminder,
+  now: Date,
+): void {
+  if (reminder.recurrence === undefined) return;
+  const following = nextOccurrence(
+    reminder.recurrence,
+    new Date(reminder.dueAt),
+  );
+  if (new Date(following).getTime() > now.getTime()) return;
+
+  deps.log.warn(
+    {
+      reminderId: reminder.id,
+      tenantId: reminder.tenantId,
+      recurrence: describeRecurrence(reminder.recurrence),
+      dueAt: reminder.dueAt,
+    },
+    'Collapsed missed occurrences of a recurring reminder into a single delivery',
+  );
 }

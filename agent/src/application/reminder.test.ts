@@ -4,13 +4,18 @@ import type {
   ScheduleReminderInput,
 } from '../domain/ports/reminder-store.ts';
 import type { VoiceChannelRef } from '../domain/ports/voice-output.ts';
-import type { Reminder } from '../domain/reminder.ts';
+import {
+  createRecurrence,
+  nextOccurrence,
+  type Reminder,
+} from '../domain/reminder.ts';
 import type { TenantId } from '../domain/tenant.ts';
 import {
   cancelReminder,
   fireDueReminders,
   listReminders,
   type ReminderDeliveryDependencies,
+  scheduleRecurringReminder,
   scheduleReminder,
 } from './reminder.ts';
 
@@ -38,6 +43,7 @@ function createFakeReminderStore(): ReminderStore {
         title: input.title,
         description: input.description,
         dueAt: input.dueAt,
+        recurrence: input.recurrence,
         channelId: input.channelId,
         guildId: input.guildId,
         createdBy: input.createdBy,
@@ -70,9 +76,18 @@ function createFakeReminderStore(): ReminderStore {
       const claimed: Reminder[] = [];
       for (const [index, row] of rows.entries()) {
         if (row.firedAt !== undefined || row.dueAt > now) continue;
-        const fired = { ...row, firedAt: now };
-        rows[index] = fired;
-        claimed.push(fired);
+        if (row.recurrence === undefined) {
+          const fired = { ...row, firedAt: now };
+          rows[index] = fired;
+          claimed.push(fired);
+          continue;
+        }
+        // 繰り返しは消えず、次回へ進む（SQLite 実装と同じ契約）。
+        rows[index] = {
+          ...row,
+          dueAt: nextOccurrence(row.recurrence, new Date(now)),
+        };
+        claimed.push(row);
       }
       return claimed.sort((a, b) => a.dueAt.localeCompare(b.dueAt));
     },
@@ -83,6 +98,7 @@ interface Harness {
   deps: ReminderDeliveryDependencies;
   spoken: Array<{ text: string; priority: string }>;
   sent: Array<{ channelId: string; text: string }>;
+  warnings: string[];
   errors: string[];
 }
 
@@ -92,11 +108,13 @@ function createHarness(options: {
 }): Harness {
   const spoken: Array<{ text: string; priority: string }> = [];
   const sent: Array<{ channelId: string; text: string }> = [];
+  const warnings: string[] = [];
   const errors: string[] = [];
 
   return {
     spoken,
     sent,
+    warnings,
     errors,
     deps: {
       store: createFakeReminderStore(),
@@ -121,7 +139,9 @@ function createHarness(options: {
       },
       log: {
         info: () => undefined,
-        warn: () => undefined,
+        warn: (_context, message) => {
+          warnings.push(message);
+        },
         error: (_context, message) => {
           errors.push(message);
         },
@@ -202,6 +222,63 @@ describe('scheduleReminder', () => {
   });
 });
 
+function scheduleWeekly(harness: Harness, weekday: 'tue' = 'tue') {
+  return scheduleRecurringReminder(harness.deps, {
+    tenantId: TENANT,
+    title: 'ゴミを出す',
+    description: undefined,
+    recurrence: createRecurrence({
+      kind: 'weekly',
+      weekdays: [weekday],
+      time: '09:00',
+    }),
+    channelId: 'c1',
+    guildId: 'g1',
+    createdBy: 'u1',
+    now: NOW,
+  });
+}
+
+describe('scheduleRecurringReminder', () => {
+  let harness: Harness;
+
+  beforeEach(() => {
+    harness = createHarness({});
+  });
+
+  it('最初の回を規則から決める（過去判定が要らない）', () => {
+    // NOW は 2026-09-12（土）09:00 JST。次の火曜は 9/15 の 09:00 JST。
+    const reminder = scheduleWeekly(harness);
+    expect(reminder.dueAt).toBe('2026-09-15T00:00:00.000Z');
+    expect(reminder.recurrence).toEqual({
+      kind: 'weekly',
+      weekdays: ['tue'],
+      time: '09:00',
+    });
+  });
+
+  it('空の内容は拒む', () => {
+    expect(() =>
+      scheduleRecurringReminder(harness.deps, {
+        tenantId: TENANT,
+        title: '  ',
+        description: undefined,
+        recurrence: createRecurrence({ kind: 'daily', time: '09:00' }),
+        channelId: 'c1',
+        guildId: 'g1',
+        createdBy: 'u1',
+        now: NOW,
+      }),
+    ).toThrow(/内容が空/);
+  });
+
+  // 鳴っても消えないぶん、上限に効かせておかないと際限なく溜まる。
+  it('1 回限りのものと同じ枠で数える', () => {
+    for (let i = 0; i < 100; i++) schedule(harness, '2026-09-12T10:00');
+    expect(() => scheduleWeekly(harness)).toThrow(/上限/);
+  });
+});
+
 describe('cancelReminder', () => {
   it('消せたかどうかを返す', () => {
     const harness = createHarness({});
@@ -212,6 +289,58 @@ describe('cancelReminder', () => {
     expect(
       cancelReminder(harness.deps, { tenantId: TENANT, id: reminder.id }),
     ).toBe(false);
+  });
+});
+
+describe('fireDueReminders（繰り返し）', () => {
+  it('鳴っても消えず、次の回を向く', async () => {
+    const harness = createHarness({});
+    scheduleWeekly(harness);
+
+    const fired = await fireDueReminders(
+      harness.deps,
+      new Date('2026-09-15T00:00:30.000Z'),
+    );
+    expect(fired).toBe(1);
+    expect(harness.sent).toEqual([
+      { channelId: 'c1', text: 'リマインダーです。ゴミを出す' },
+    ]);
+
+    const [pending] = listReminders(harness.deps, TENANT);
+    expect(pending?.dueAt).toBe('2026-09-22T00:00:00.000Z');
+  });
+
+  it('止まっていた間に過ぎた回は畳み、畳んだことを WARN で残す（→ D-29, INV-7）', async () => {
+    const harness = createHarness({});
+    scheduleRecurringReminder(harness.deps, {
+      tenantId: TENANT,
+      title: '朝の確認',
+      description: undefined,
+      recurrence: createRecurrence({ kind: 'daily', time: '09:00' }),
+      channelId: 'c1',
+      guildId: 'g1',
+      createdBy: 'u1',
+      now: NOW,
+    });
+
+    // 3 日止まっていた。3 回ではなく 1 回だけ届く。
+    expect(
+      await fireDueReminders(
+        harness.deps,
+        new Date('2026-09-16T02:00:00.000Z'),
+      ),
+    ).toBe(1);
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.warnings).toEqual([
+      'Collapsed missed occurrences of a recurring reminder into a single delivery',
+    ]);
+  });
+
+  it('遅れずに鳴ったときは WARN を出さない', async () => {
+    const harness = createHarness({});
+    scheduleWeekly(harness);
+    await fireDueReminders(harness.deps, new Date('2026-09-15T00:00:30.000Z'));
+    expect(harness.warnings).toEqual([]);
   });
 });
 

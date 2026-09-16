@@ -59,7 +59,8 @@ await registerSlashCommands(client, {
  * `setInterval` ではなく 1 回ごとに次を仕込む。**間隔は設定ファイルから毎回
  * 読み直す**ので、書き換えれば次の確認から効く（再起動が要らない）。
  * 起動時に期限が過ぎているものは、最初の確認でまとめて発火する —— 止まって
- * いた間のリマインダーを黙って捨てない。
+ * いた間のリマインダーを黙って捨てない（**繰り返しだけは 1 回に畳む**。
+ * 同じ文面が連続で鳴るほうが害が大きい → D-29）。
  */
 function startReminderPoller(deps: ReminderDeliveryDependencies): void {
   async function tick(): Promise<void> {

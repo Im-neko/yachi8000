@@ -1,12 +1,14 @@
-import type { Reminder } from '../reminder.ts';
+import type { Recurrence, Reminder } from '../reminder.ts';
 import type { TenantId } from '../tenant.ts';
 
 export interface ScheduleReminderInput {
   tenantId: TenantId;
   title: string;
   description: string | undefined;
-  /** ISO 8601（UTC）。 */
+  /** 最初に鳴る時刻。ISO 8601（UTC）。 */
   dueAt: string;
+  /** 繰り返しの規則。1 回限りなら undefined（→ D-29）。 */
+  recurrence: Recurrence | undefined;
   channelId: string;
   guildId: string | undefined;
   createdBy: string | undefined;
@@ -29,11 +31,18 @@ export interface ReminderStore {
   /** 消せたら true、そのテナントに無い / 既に発火済みなら false。 */
   cancel(tenantId: TenantId, id: string): boolean;
   /**
-   * 期限が来た未発火のものを**発火済みにしてから**返す。
+   * 期限が来た未発火のものを**先に進めてから**返す。
    *
-   * 先に印を付けるので、配信に失敗した分は読み上げられないまま終わる。
-   * 二重に読み上げるより、落としたことをログに残すほうがましという判断
-   * （→ D-23）。
+   * - 1 回限り: `fired_at` を立てる。以後どのクエリにも出てこない
+   * - 繰り返し: `due_at` を `now` の次の回へ進める。`fired_at` は触らない
+   *   （→ D-29）。**止まっていた間に過ぎた回はまとめて鳴らさず、1 回に畳む**
+   *
+   * どちらも先に印を付けるので、配信に失敗した分は読み上げられないまま
+   * 終わる。二重に読み上げるより、落としたことをログに残すほうがましという
+   * 判断（→ D-23）。
+   *
+   * 返す `Reminder` は**鳴った回**のスナップショット —— `dueAt` は進める前の
+   * 値で、繰り返しでも `firedAt` は undefined のまま。
    */
   claimDue(now: string): readonly Reminder[];
 }

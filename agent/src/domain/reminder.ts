@@ -14,8 +14,10 @@ export interface Reminder {
   title: string;
   /** 補足。無ければ undefined。 */
   description: string | undefined;
-  /** 期限。ISO 8601（UTC）で持つ。 */
+  /** 次に鳴る時刻。ISO 8601（UTC）で持つ。 */
   dueAt: string;
+  /** 繰り返しの規則。1 回限りなら undefined（→ D-29）。 */
+  recurrence: Recurrence | undefined;
   /** 発火時の配信先。登録されたチャンネルへ返す。 */
   channelId: string;
   /** ギルドのリマインダーなら、そのギルド。DM なら undefined。 */
@@ -23,7 +25,13 @@ export interface Reminder {
   /** 登録した人。分からなければ undefined。 */
   createdBy: string | undefined;
   createdAt: string;
-  /** 発火済みなら ISO 8601。未発火なら undefined。 */
+  /**
+   * 発火済みなら ISO 8601。未発火なら undefined。
+   *
+   * **繰り返しのリマインダーでは永久に undefined。** 鳴っても消えず、`dueAt`
+   * が次回へ進むだけ（→ D-29）。この列は「まだ生きているか」の述語として
+   * 一覧・削除・ポーリングの 3 箇所で引かれる。
+   */
   firedAt: string | undefined;
 }
 
@@ -83,4 +91,136 @@ export function composeReminderText(reminder: Reminder): string {
   return description
     ? `リマインダーです。${reminder.title}\n${description}`
     : `リマインダーです。${reminder.title}`;
+}
+
+/** `Date.getUTCDay()` と同じ並び。JST へ寄せた時刻に対して引く。 */
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+
+export type Weekday = (typeof WEEKDAYS)[number];
+
+const WEEKDAY_LABELS: Readonly<Record<Weekday, string>> = {
+  sun: '日',
+  mon: '月',
+  tue: '火',
+  wed: '水',
+  thu: '木',
+  fri: '金',
+  sat: '土',
+};
+
+/**
+ * 繰り返しの規則（F-31）。
+ *
+ * **時刻は JST の `HH:mm`。** 1 回限りのリマインダーが絶対時刻を保存するのに
+ * 対して、繰り返しは規則そのものを保存する —— 解決するのは発火のたびに
+ * `nextOccurrence` で、**LLM は一切通らない**（→ D-29）。
+ */
+export type Recurrence =
+  | { kind: 'daily'; time: string }
+  | { kind: 'weekly'; weekdays: readonly Weekday[]; time: string };
+
+export interface RecurrenceInput {
+  kind: 'daily' | 'weekly';
+  /** `weekly` のときだけ意味がある。空なら弾く。 */
+  weekdays?: readonly string[] | undefined;
+  /** JST の `HH:mm`。 */
+  time: string;
+}
+
+const TIME_OF_DAY = /^(\d{2}):(\d{2})$/;
+
+function parseTimeOfDay(input: string): { hour: number; minute: number } {
+  const match = TIME_OF_DAY.exec(input.trim());
+  if (!match) {
+    throw new Error(
+      `時刻の形式が違います（${input}）。HH:mm の形で、日本時間で指定してください。`,
+    );
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) {
+    throw new Error(`存在しない時刻です: ${input}`);
+  }
+  return { hour, minute };
+}
+
+function isWeekday(value: string): value is Weekday {
+  return (WEEKDAYS as readonly string[]).includes(value);
+}
+
+/**
+ * 繰り返しの規則を組み立てる。**壊れた入力はここで落とす。**
+ *
+ * 曜日は重複を潰して日曜起点に並べ替える。同じ規則が違う並びで保存されると、
+ * 一覧の見え方が登録のたびに変わる。
+ */
+export function createRecurrence(input: RecurrenceInput): Recurrence {
+  const time = input.time.trim();
+  parseTimeOfDay(time);
+
+  if (input.kind === 'daily') return { kind: 'daily', time };
+
+  const given = input.weekdays ?? [];
+  for (const weekday of given) {
+    if (!isWeekday(weekday)) {
+      throw new Error(
+        `曜日として解釈できません: ${weekday}（${WEEKDAYS.join(' / ')} のいずれか）`,
+      );
+    }
+  }
+  const weekdays = WEEKDAYS.filter((weekday) => given.includes(weekday));
+  if (weekdays.length === 0) {
+    throw new Error('毎週のリマインダーには曜日を 1 つ以上指定してください。');
+  }
+  return { kind: 'weekly', weekdays, time };
+}
+
+/** JST は固定 +09:00（夏時間が無い）。この前提で日付計算をずらして行う。 */
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * `after` より**厳密に後**の、最初の発火時刻を UTC の ISO 8601 で返す。
+ *
+ * JST へ 9 時間ずらした空間で `getUTC*` だけを使って数える。`Intl` で文字列に
+ * 直してから組み直すより短く、夏時間の無い固定オフセットでは厳密。
+ *
+ * 「ちょうどその時刻」を次回に数えないのは、発火直後の繰り上げで同じ回を
+ * 二度鳴らさないため。
+ */
+export function nextOccurrence(rule: Recurrence, after: Date): string {
+  const { hour, minute } = parseTimeOfDay(rule.time);
+  const shifted = after.getTime() + JST_OFFSET_MS;
+  const day = new Date(shifted);
+  const first = Date.UTC(
+    day.getUTCFullYear(),
+    day.getUTCMonth(),
+    day.getUTCDate(),
+    hour,
+    minute,
+  );
+
+  // 8 日あれば毎週のどの曜日にも必ず当たる。
+  for (let offset = 0; offset < 8; offset += 1) {
+    const at = first + offset * DAY_MS;
+    if (at <= shifted) continue;
+    if (rule.kind === 'weekly') {
+      const weekday = WEEKDAYS[new Date(at).getUTCDay()];
+      if (weekday === undefined || !rule.weekdays.includes(weekday)) continue;
+    }
+    return new Date(at - JST_OFFSET_MS).toISOString();
+  }
+
+  throw new Error(
+    `次の発火時刻を決められませんでした: ${describeRecurrence(rule)}`,
+  );
+}
+
+/** 一覧や登録の返事で見せる文言。 */
+export function describeRecurrence(rule: Recurrence): string {
+  if (rule.kind === 'daily') return `毎日 ${rule.time}`;
+  const weekdays = rule.weekdays
+    .map((weekday) => WEEKDAY_LABELS[weekday])
+    .join('・');
+  return `毎週${weekdays}曜 ${rule.time}`;
 }

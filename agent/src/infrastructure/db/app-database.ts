@@ -26,6 +26,7 @@ const SCHEMA = [
      title        TEXT NOT NULL,
      description  TEXT,
      due_at       TEXT NOT NULL,
+     recurrence   TEXT,
      channel_id   TEXT NOT NULL,
      guild_id     TEXT,
      created_by   TEXT,
@@ -68,6 +69,31 @@ const SCHEMA = [
 ];
 
 /**
+ * 後から足した列。**`CREATE TABLE IF NOT EXISTS` は既存のテーブルに列を
+ * 足さない** —— 先に作られた DB では `prepare` が起動時に落ちる。
+ *
+ * SQLite に `ADD COLUMN IF NOT EXISTS` は無いので、`table_info` を引いて
+ * 無いときだけ足す。「重複列」のエラーを握り潰す形にはしない（他の理由で
+ * 失敗したときに気付けなくなる）。
+ */
+const ADDED_COLUMNS: readonly {
+  table: string;
+  column: string;
+  type: string;
+}[] = [{ table: 'reminders', column: 'recurrence', type: 'TEXT' }];
+
+function addMissingColumns(db: DatabaseSync): void {
+  for (const { table, column, type } of ADDED_COLUMNS) {
+    const columns = db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all() as unknown as { name: string }[];
+    if (columns.some((existing) => existing.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    logger.info({ table, column }, 'Added a missing column');
+  }
+}
+
+/**
  * DB を開いてスキーマを用意する。**失敗したら投げる** —— 書けない状態で
  * 起動すると、リマインダーを受け付けたつもりで消えていく。
  */
@@ -83,6 +109,7 @@ export function openAppDatabase(path: string): DatabaseSync {
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
   for (const statement of SCHEMA) db.exec(statement);
+  addMissingColumns(db);
 
   logger.info({ path }, 'Opened the runtime state database');
   return db;
