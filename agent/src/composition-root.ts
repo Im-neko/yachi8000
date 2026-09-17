@@ -20,6 +20,7 @@ import { createDiscordTextNotifier } from './infrastructure/discord/text-notifie
 import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.ts';
 import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
+import { createReminderPhraser } from './infrastructure/llm/reminder-phraser.ts';
 import { createPgvectorMemoryStore } from './infrastructure/memory/pgvector-memory-store.ts';
 import { createSqlitePersonaDiffStore } from './infrastructure/persona/sqlite-persona-diff-store.ts';
 import { createSqliteReminderStore } from './infrastructure/reminder/sqlite-reminder-store.ts';
@@ -127,6 +128,12 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
     },
     reminder: {
       store: reminderStore,
+      phraser: createReminderPhraser({
+        baseUrl: env.LLM_PROXY_BASE_URL,
+        apiKey: env.LLM_PROXY_API_KEY,
+        model: env.LLM_MODEL,
+        settings,
+      }),
       speech,
       voice,
       text,

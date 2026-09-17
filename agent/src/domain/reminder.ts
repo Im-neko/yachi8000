@@ -3,9 +3,9 @@ import type { TenantId } from './tenant.ts';
 /**
  * 日時指定のリマインダー（F-31）。
  *
- * 本文は**利用者が書いた文言のまま**持つ。読み上げ時に LLM で言い換えない
- * （→ D-08）。外部通知（F-16）とはここが逆で、通知は自然文に馴染ませることに
- * 価値があり、リマインダーは書いたとおりに思い出させることに価値がある。
+ * 本文は**利用者が書いた文言のまま**持つ。保存された文面は、発火時に LLM が
+ * 伝える一言を組み立てるための**素材**になる（→ D-30）。要約して保存すると
+ * 素材の側が既に痩せていて、組み立てで取り返せない。
  */
 export interface Reminder {
   id: string;
@@ -80,11 +80,14 @@ export function formatJstDateTime(date: Date): string {
 }
 
 /**
- * 発火時の文面（F-31, D-08）。
+ * 文面づくり（D-30）に失敗したときの決定的な定型文（F-31）。
  *
  * **保存済みの title / description をそのまま並べるだけ。** 言い換えも要約も
  * しない。前置きの「リマインダーです。」は文の切れ目を作るための定型で、
  * 利用者の文言には手を入れない。
+ *
+ * house rule のフォールバック禁止の例外にあたる「意図的な部分縮退」。
+ * 使ったことは必ず WARN に出す（application/reminder.ts）。
  */
 export function composeReminderText(reminder: Reminder): string {
   const description = reminder.description?.trim();

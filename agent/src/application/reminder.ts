@@ -1,3 +1,4 @@
+import type { ReminderPhraser } from '../domain/ports/reminder-phraser.ts';
 import type {
   ReminderStore,
   ScheduleReminderInput,
@@ -23,6 +24,7 @@ export interface ReminderDependencies {
 }
 
 export interface ReminderDeliveryDependencies extends ReminderDependencies {
+  phraser: ReminderPhraser;
   speech: SpeechService;
   voice: VoiceOutput;
   text: TextNotifier;
@@ -154,12 +156,16 @@ export function cancelReminder(
 /**
  * 期限が来たものを配信する（F-31）。固定間隔の poller から呼ぶ。
  *
- * **LLM をまったく通さない。** 文面は保存済みの title / description から
- * 決定的に組む（→ D-08）。
+ * 文面は保存済みの title / description を**素材にして LLM が組み立てる**
+ * （→ D-30）。失敗したら決定的テンプレートへ縮退し、WARN を出す。
  *
  * 配信は「登録されたチャンネルへのテキスト」が本体で、**同じサーバの VC に
  * 繋いでいるときだけ**声も出す。DM のリマインダーを繋いでいる VC で読み上げ
  * るのは宛先として筋が通らない（message-handler と同じ判定）。
+ *
+ * **1 件ずつ順に組み立てる。** まとめて発火したときは件数ぶん待つことになる
+ * が、poller は次の確認を `finally` で仕込むので重ならない（二重発火の隙が
+ * できない → D-30）。
  *
  * @returns 配信を試みた件数。
  */
@@ -171,8 +177,8 @@ export async function fireDueReminders(
   if (due.length === 0) return 0;
 
   for (const reminder of due) {
-    const text = composeReminderText(reminder);
     warnOnSkippedOccurrences(deps, reminder, now);
+    const text = await phraseOrDegrade(deps, reminder, now);
 
     const inSameGuild =
       reminder.guildId !== undefined &&
@@ -207,6 +213,29 @@ export async function fireDueReminders(
   }
 
   return due.length;
+}
+
+/**
+ * 文面を組み立てる（F-31, D-30）。失敗したら定型文へ縮退する。
+ *
+ * 縮退は house rule のフォールバック禁止の例外（意図的な部分縮退）であり、
+ * **必ず WARN を出す**。黙って隠すと「毎回定型文に戻っているのに動いて
+ * 見える」—— 読み上げは流れて消えるので、気付く手がかりがログしかない。
+ */
+async function phraseOrDegrade(
+  deps: ReminderDeliveryDependencies,
+  reminder: Reminder,
+  now: Date,
+): Promise<string> {
+  try {
+    return await deps.phraser.phrase(reminder, now);
+  } catch (error) {
+    deps.log.warn(
+      { err: error, reminderId: reminder.id, tenantId: reminder.tenantId },
+      'Failed to phrase the reminder — falling back to the deterministic template',
+    );
+    return composeReminderText(reminder);
+  }
 }
 
 /**

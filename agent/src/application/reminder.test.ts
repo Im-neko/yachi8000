@@ -96,28 +96,43 @@ function createFakeReminderStore(): ReminderStore {
 
 interface Harness {
   deps: ReminderDeliveryDependencies;
+  phrased: Array<{ reminder: Reminder; firedAt: Date }>;
   spoken: Array<{ text: string; priority: string }>;
   sent: Array<{ channelId: string; text: string }>;
   warnings: string[];
   errors: string[];
 }
 
+/** 既定の文面づくり。**定型文とは違う形**にして、どちらを通ったか見分ける。 */
+async function phraseLikeAnAssistant(reminder: Reminder): Promise<string> {
+  return `${reminder.title}、そろそろだよ。`;
+}
+
 function createHarness(options: {
   connectedTo?: VoiceChannelRef;
   send?: () => Promise<void>;
+  phrase?: (reminder: Reminder, firedAt: Date) => Promise<string>;
 }): Harness {
   const spoken: Array<{ text: string; priority: string }> = [];
   const sent: Array<{ channelId: string; text: string }> = [];
+  const phrased: Array<{ reminder: Reminder; firedAt: Date }> = [];
   const warnings: string[] = [];
   const errors: string[] = [];
 
   return {
     spoken,
     sent,
+    phrased,
     warnings,
     errors,
     deps: {
       store: createFakeReminderStore(),
+      phraser: {
+        phrase: (reminder, firedAt) => {
+          phrased.push({ reminder, firedAt });
+          return (options.phrase ?? phraseLikeAnAssistant)(reminder, firedAt);
+        },
+      },
       speech: {
         speak: ({ text, priority }) => {
           spoken.push({ text, priority });
@@ -303,7 +318,7 @@ describe('fireDueReminders（繰り返し）', () => {
     );
     expect(fired).toBe(1);
     expect(harness.sent).toEqual([
-      { channelId: 'c1', text: 'リマインダーです。ゴミを出す' },
+      { channelId: 'c1', text: 'ゴミを出す、そろそろだよ。' },
     ]);
 
     const [pending] = listReminders(harness.deps, TENANT);
@@ -352,7 +367,7 @@ describe('fireDueReminders', () => {
     expect(harness.sent).toHaveLength(0);
   });
 
-  it('期限が来たら登録されたチャンネルへ保存した文面のまま流す（D-08）', async () => {
+  it('期限が来たら組み立てた文面を登録されたチャンネルへ流す（→ D-30）', async () => {
     const harness = createHarness({});
     schedule(harness, '2026-09-12T10:00', { channelId: 'target-channel' });
 
@@ -362,7 +377,39 @@ describe('fireDueReminders', () => {
     );
     expect(fired).toBe(1);
     expect(harness.sent).toEqual([
-      { channelId: 'target-channel', text: 'リマインダーです。ゴミを出す' },
+      { channelId: 'target-channel', text: 'ゴミを出す、そろそろだよ。' },
+    ]);
+  });
+
+  it('保存したリマインダーと発火時刻を素材として渡す', async () => {
+    const harness = createHarness({});
+    schedule(harness, '2026-09-12T10:00');
+
+    const firedAt = new Date('2026-09-12T01:00:00.000Z');
+    await fireDueReminders(harness.deps, firedAt);
+    expect(harness.phrased).toHaveLength(1);
+    expect(harness.phrased[0]?.reminder.title).toBe('ゴミを出す');
+    expect(harness.phrased[0]?.firedAt).toEqual(firedAt);
+  });
+
+  // 縮退したことはログにしか残らない。読み上げは流れて消える。
+  it('文面づくりに失敗したら定型文へ縮退し、WARN を残す（→ INV-7）', async () => {
+    const harness = createHarness({
+      phrase: () => Promise.reject(new Error('LLM が落ちている')),
+    });
+    schedule(harness, '2026-09-12T10:00');
+
+    expect(
+      await fireDueReminders(
+        harness.deps,
+        new Date('2026-09-12T01:00:00.000Z'),
+      ),
+    ).toBe(1);
+    expect(harness.sent).toEqual([
+      { channelId: 'c1', text: 'リマインダーです。ゴミを出す' },
+    ]);
+    expect(harness.warnings).toEqual([
+      'Failed to phrase the reminder — falling back to the deterministic template',
     ]);
   });
 
@@ -374,7 +421,7 @@ describe('fireDueReminders', () => {
 
     await fireDueReminders(harness.deps, new Date('2026-09-12T01:00:00.000Z'));
     expect(harness.spoken).toEqual([
-      { text: 'リマインダーです。ゴミを出す', priority: 'reminder' },
+      { text: 'ゴミを出す、そろそろだよ。', priority: 'reminder' },
     ]);
   });
 
