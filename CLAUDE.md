@@ -13,6 +13,7 @@
 | 3 | 外部通知（F-15〜F-19） | 実装済み・稼働中 |
 | 3.5 | リマインダーと調べもの（F-31, F-35） | 実装済み・**デプロイ済み（実機未確認）** |
 | 4 | スキル自己改善（F-40〜F-43, F-33, F-34） | 実装済み・**デプロイ済み（実機未確認）** |
+| 4.5 | スレッドから Issue 起票（F-37） | 実装済み・**未デプロイ** |
 | 5 | Slack 連携 | 未着手 |
 | 6 | アバター | 未着手 |
 | 7 | 音声入力 | 未着手 |
@@ -22,6 +23,11 @@
 **⚠ 通知の宛先指定（D-31）は 2026-09-18 に実装したが、まだ push していない。** CI（typecheck / lint / test）はローカルで通っている。**クラスタ側の前提が 2 つ未反映**: PVC 上の `settings.yaml` の `notification.channels`（ArgoCD の管理外なので手で置く）と、`NOTIFY_TOKENS` への `money-topic:<トークン>` の追加（Sealed Secret）。**どちらも入れないと、宛先を指定した通知は 400 か 401 で弾かれる。** 呼ぶ側は別リポジトリの money-topic（`/home/yui/apps/money-topic`）。
 
 クラスタ側の前提（`BRAVE_SEARCH_API_KEY` の Sealed Secret、`APP_DB_PATH`、PVC 上の `settings.yaml` の `reminderPollIntervalSeconds`）は**反映済み**。手順は `docs/setup/deploy.md`。
+
+**⚠ Issue 起票（F-37）のクラスタ側の前提は 2 つとも未反映。** どちらも入れるまで、スレッドで「Issue にして」と頼んでも失敗する:
+
+- `GITHUB_TOKEN` の Sealed Secret（fine-grained PAT、対象リポジトリの `issues: write` のみ）。**任意の環境変数なので、無くても起動はする** —— 失敗するのは頼まれた瞬間だけで、起動ログには出ない
+- PVC 上の `settings.yaml` の `issueTracker.repositories`（ArgoCD の管理外なので手で置く）。例: `"1478391009934180352": Im-neko/stocktrade`
 
 要件の正典は引き続き `docs/requirements/`。実装は `agent/`。
 

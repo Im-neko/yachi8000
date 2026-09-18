@@ -35,6 +35,14 @@ const SettingsSchema = v.object({
       ),
     ),
   }),
+  issueTracker: v.optional(
+    v.object({
+      repositories: v.record(
+        v.pipe(v.string(), v.regex(/^\d{17,20}$/)),
+        v.pipe(v.string(), v.regex(/^[\w.-]+\/[\w.-]+$/)),
+      ),
+    }),
+  ),
   behavior: v.object({
     personaLock: v.boolean(),
     reminderPollIntervalSeconds: v.pipe(
