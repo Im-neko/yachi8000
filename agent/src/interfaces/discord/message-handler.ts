@@ -4,6 +4,7 @@ import { runAgentTurn } from '../../agents/run-turn.ts';
 import type { SpeechService } from '../../application/speech.ts';
 import type { VoiceSessionDependencies } from '../../application/voice-session.ts';
 import { currentVoiceChannel } from '../../application/voice-session.ts';
+import { formatJstDate } from '../../domain/issue.ts';
 import { shouldRespond } from '../../domain/response-policy.ts';
 import { logger } from '../../observability/logger.ts';
 import { splitForDiscord } from './outgoing.ts';
@@ -17,6 +18,39 @@ export interface MessageHandlerDependencies {
 /** 本文から Bot 自身へのメンションを落とす。宛先の記号はモデルには不要。 */
 function stripSelfMention(content: string, botId: string): string {
   return content.replaceAll(new RegExp(`<@!?${botId}>`, 'g'), ' ').trim();
+}
+
+/**
+ * スレッドの元になった投稿（F-37）。Issue の出典に使う。
+ *
+ * **取れなかったら載せない。** 親が消えている・古くて引けない・権限が
+ * 足りないときに、代わりにスレッド内の適当な発言を出典にすると、
+ * 元投稿と無関係な Issue が立つ。出典が決まらないときは起票の道具自体を
+ * 配らない（→ D-33）。
+ */
+async function threadSourceOf(
+  message: Message,
+): Promise<Record<string, string> | undefined> {
+  const channel = message.channel;
+  if (!channel.isThread() || !channel.parentId) return undefined;
+
+  try {
+    const starter = await channel.fetchStarterMessage();
+    if (!starter) return undefined;
+    return {
+      threadParentChannelId: channel.parentId,
+      threadStarterMessageId: starter.id,
+      threadStarterText: starter.content,
+      threadStarterUrl: starter.url,
+      threadStarterPostedOn: formatJstDate(starter.createdAt),
+    };
+  } catch (error) {
+    logger.warn(
+      { err: error, threadId: channel.id },
+      'Could not read the thread starter message — issue creation stays unavailable here',
+    );
+    return undefined;
+  }
 }
 
 async function handleMessage(
@@ -58,6 +92,8 @@ async function handleMessage(
       channelId: message.channelId,
       // リマインダーの発火先を決めるのに使う（F-31）。DM には載らない。
       ...(message.inGuild() ? { guildId: message.guildId } : {}),
+      // スレッドの中なら、その元投稿。Issue の出典に使う（F-37）。
+      ...((await threadSourceOf(message)) ?? {}),
     },
   };
 

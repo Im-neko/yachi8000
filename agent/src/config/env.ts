@@ -69,6 +69,15 @@ const EnvSchema = v.object({
   DISCORD_BOT_TOKEN: v.pipe(v.string(), v.minLength(1)),
 
   /**
+   * Issue を立てるためのトークン（F-37）。fine-grained PAT で、対象の
+   * リポジトリに `issues: write` だけを与える。
+   *
+   * **任意。** 未設定でも起動はする（起票を頼まれたときだけ失敗する）。
+   * どのリポジトリへ立てるかは設定ファイル側（`issueTracker.repositories`）。
+   */
+  GITHUB_TOKEN: v.optional(v.pipe(v.string(), v.minLength(1))),
+
+  /**
    * 音声合成エンジンのベース URL（D-05）。エンジンは別 Deployment で動き、
    * yachi8000 は接続情報だけを受け取る。話者 ID は設定ファイル側（F-60）。
    */

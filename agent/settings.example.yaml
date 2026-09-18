@@ -46,6 +46,13 @@ notification:
   #     guildId: "000000000000000000"
   #     channelId: "000000000000000000"
 
+# スレッドの元投稿を Issue にする先（F-37）。**チャンネル ID → owner/name。**
+# ここに無いチャンネルでは起票しない（設定を書いた人だけが行き先を決める）。
+# 起票には GITHUB_TOKEN（fine-grained PAT、対象リポジトリの issues: write）が要る。
+# issueTracker:
+#   repositories:
+#     "000000000000000000": owner/repository
+
 behavior:
   # 人格・口調固定モード（F-34）。true にすると、会話を通じて積み上がった
   # 人格の差分を応答に使わなくなる（記録自体は止めない。false に戻せば元の続きから効く）。

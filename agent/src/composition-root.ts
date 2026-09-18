@@ -1,4 +1,5 @@
 import type { Client } from 'discord.js';
+import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
 import type { PersonaDependencies } from './application/persona.ts';
@@ -14,10 +15,13 @@ import {
 import type { VoiceSessionDependencies } from './application/voice-session.ts';
 import type { WebSearchDependencies } from './application/web-search.ts';
 import { env } from './config/env.ts';
+import type { IssueTracker } from './domain/ports/issue-tracker.ts';
 import type { SpeechSynthesizer } from './domain/ports/speech-synthesizer.ts';
 import { openAppDatabase } from './infrastructure/db/app-database.ts';
+import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
 import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.ts';
+import { createGithubIssueTracker } from './infrastructure/github/github-issue-tracker.ts';
 import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
 import { createReminderPhraser } from './infrastructure/llm/reminder-phraser.ts';
@@ -79,6 +83,33 @@ export const reminderDependencies: ReminderDependencies = {
 
 export const webSearchDependencies: WebSearchDependencies = {
   searcher: createBraveSearcher({ apiKey: env.BRAVE_SEARCH_API_KEY }),
+};
+
+/**
+ * 起票先が無い環境でも起動はできるようにする。**代わりに黙って成功しない**
+ * —— 呼ばれた時点で「トークンが無い」と名指しで投げ、その文面が利用者まで届く。
+ * 起票は常時動いている必要がある機能ではないので、起動を止める理由にはしない。
+ */
+function createIssueTrackerFromEnv(): IssueTracker {
+  const token = env.GITHUB_TOKEN;
+  if (!token) {
+    return {
+      create() {
+        throw new Error(
+          'GITHUB_TOKEN が設定されていないため Issue を立てられません。運用者に設定を頼んでください。',
+        );
+      },
+    };
+  }
+  return createGithubIssueTracker({ token });
+}
+
+/** チャットの投稿を Issue にする経路（F-37）。 */
+export const issueDependencies: IssueDependencies = {
+  tracker: createIssueTrackerFromEnv(),
+  settings,
+  marker: createDiscordMessageMarker({ token: env.DISCORD_BOT_TOKEN }),
+  log: logger,
 };
 
 /** 設定ファイルの現在値。表示整形（Discord 側）からも読む。 */

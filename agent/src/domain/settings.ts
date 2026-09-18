@@ -39,6 +39,13 @@ export interface Settings {
       Record<string, { readonly guildId: string; readonly channelId: string }>
     >;
   };
+  /**
+   * Issue を立てる先（F-37）。**チャンネル ID → `owner/name`。**
+   * ここに無いチャンネルでは起票しない（→ D-32）。
+   */
+  issueTracker?: {
+    repositories: Record<string, string>;
+  };
   behavior: {
     /** 人格・口調固定モード（F-34）。 */
     personaLock: boolean;
