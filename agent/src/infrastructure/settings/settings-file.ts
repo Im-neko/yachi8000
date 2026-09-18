@@ -6,6 +6,9 @@ import type { Settings } from '../../domain/settings.ts';
 import { logger } from '../../observability/logger.ts';
 
 const NonEmpty = v.pipe(v.string(), v.minLength(1));
+const Snowflake = v.pipe(v.string(), v.regex(/^\d{17,20}$/));
+/** 通知の宛先名（F-15）。送信元が本文で指定するので、形を狭く決めておく。 */
+const ChannelName = v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]{0,31}$/));
 
 const SettingsSchema = v.object({
   identity: v.object({
@@ -24,7 +27,13 @@ const SettingsSchema = v.object({
   }),
   notification: v.object({
     whenNotInVoice: v.picklist(['text', 'drop']),
-    fallbackChannelId: v.optional(v.pipe(v.string(), v.regex(/^\d{17,20}$/))),
+    fallbackChannelId: v.optional(Snowflake),
+    channels: v.optional(
+      v.record(
+        ChannelName,
+        v.object({ guildId: Snowflake, channelId: Snowflake }),
+      ),
+    ),
   }),
   behavior: v.object({
     personaLock: v.boolean(),

@@ -25,6 +25,19 @@ export interface Settings {
     whenNotInVoice: 'text' | 'drop';
     /** `whenNotInVoice: 'text'` のときの配信先チャンネル。未設定なら破棄に倒す。 */
     fallbackChannelId?: string;
+    /**
+     * 通知が名前で選べる配信先（F-15）。
+     *
+     * **チャンネル ID をリクエストで受けない**のは、それを許すと「喋らせる」
+     * ために配ったトークンが「Bot の見えるどこへでも書ける」権限に化けるため
+     * （→ D-31）。送信元は名前で選ぶだけで、実体は運用者がここに置く。
+     *
+     * ギルド ID を併せて持つのは、読み上げを**同じサーバのときだけ**に
+     * 絞るため（リマインダーの F-31 と同じ規則）。
+     */
+    channels?: Readonly<
+      Record<string, { readonly guildId: string; readonly channelId: string }>
+    >;
   };
   behavior: {
     /** 人格・口調固定モード（F-34）。 */

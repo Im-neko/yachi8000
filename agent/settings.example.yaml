@@ -36,6 +36,15 @@ notification:
   whenNotInVoice: drop
   # whenNotInVoice: text のときの配信先。未設定なら drop と同じ扱いになる。
   # fallbackChannelId: "000000000000000000"
+  # 通知が名前で選べる配信先。POST /api/v1/notify の channel に名前を書くと、
+  # VC の接続状況に関わらずここのチャンネルへ必ず残る（読み上げは同じサーバに
+  # いるときだけ）。ここに無い名前の通知は 400 で弾かれる。
+  # チャンネル ID をリクエストで受けないのは、読み上げのために配ったトークンが
+  # 「どこへでも書ける」権限に化けるのを避けるため。
+  # channels:
+  #   money:
+  #     guildId: "000000000000000000"
+  #     channelId: "000000000000000000"
 
 behavior:
   # 人格・口調固定モード（F-34）。true にすると、会話を通じて積み上がった

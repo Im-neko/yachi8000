@@ -18,6 +18,8 @@ import { createNotifyAuthenticator, type NotifyToken } from './notify-auth.ts';
 const MAX_BODY_LENGTH = 2000;
 /** 肩書きの上限。読み上げの冒頭に入るので、1 息で読める長さに抑える。 */
 const MAX_ROLE_LENGTH = 40;
+/** 宛先の名前（F-15）。settings 側の `notification.channels` のキーと同じ形。 */
+const CHANNEL_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 const NotifyRequestSchema = v.object({
   text: v.pipe(
@@ -36,6 +38,14 @@ const NotifyRequestSchema = v.object({
   role: v.optional(
     v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_ROLE_LENGTH)),
   ),
+  /**
+   * 残しておきたい通知の宛先（F-15, D-31）。
+   *
+   * **設定に置かれた名前**であってチャンネル ID ではない。ID を受けると、
+   * 読み上げのために配ったトークンが「Bot の見えるどこへでも書ける」権限に
+   * 化ける。名前の解決先は運用者が settings に置く。
+   */
+  channel: v.optional(v.pipe(v.string(), v.trim(), v.regex(CHANNEL_NAME))),
 });
 
 export interface NotifyRoutesInput {
@@ -87,7 +97,13 @@ export function createNotifyRouter(input: NotifyRoutesInput) {
       source,
       body: parsed.output.text,
       role: parsed.output.role,
+      channel: parsed.output.channel,
     });
+    // 設定に無い宛先は配信の失敗ではなく送信元の誤り。受理したことにすると、
+    // 名前を間違えたまま黙って消え続ける（→ D-31）。
+    if (disposition === 'unknown-channel') {
+      return c.json({ error: 'unknown channel' }, 400);
+    }
     return c.json({ accepted: true, disposition }, 202);
   };
 

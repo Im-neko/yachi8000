@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { composeNotificationFallback } from './notification.ts';
+import { composeNotificationText } from './notification.ts';
 
-describe('composeNotificationFallback', () => {
+describe('composeNotificationText', () => {
   it('送信元と本文をそのまま埋める', () => {
     expect(
-      composeNotificationFallback({
+      composeNotificationText({
         source: 'claude-code',
         body: '作業が完了しました。',
       }),
@@ -14,7 +14,7 @@ describe('composeNotificationFallback', () => {
   // 並列に動かしていると「おわりました」だけでは何が終わったか分からない。
   it('役割があれば送信元に添えて読む', () => {
     expect(
-      composeNotificationFallback({
+      composeNotificationText({
         source: 'claude-code',
         role: 'レビュー担当',
         body: 'おわりました',
@@ -26,7 +26,7 @@ describe('composeNotificationFallback', () => {
   // 見た目を混ぜないことで、認証している側の意味を保つ（F-18）。
   it('空白だけの役割は無いものとして扱う', () => {
     expect(
-      composeNotificationFallback({
+      composeNotificationText({
         source: 'ci',
         role: '   ',
         body: '通りました',
