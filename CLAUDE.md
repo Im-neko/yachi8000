@@ -13,7 +13,7 @@
 | 3 | 外部通知（F-15〜F-19） | 実装済み・稼働中 |
 | 3.5 | リマインダーと調べもの（F-31, F-35） | 実装済み・**デプロイ済み（実機未確認）** |
 | 4 | スキル自己改善（F-40〜F-43, F-33, F-34） | 実装済み・**デプロイ済み（実機未確認）** |
-| 4.5 | スレッドから Issue 起票（F-37） | 実装済み・**未デプロイ** |
+| 4.5 | スレッドから Issue 起票（F-37） | 実装済み・**デプロイ済み（実機未確認）** |
 | 5 | Slack 連携 | 未着手 |
 | 6 | アバター | 未着手 |
 | 7 | 音声入力 | 未着手 |
@@ -24,7 +24,7 @@
 
 クラスタ側の前提（`BRAVE_SEARCH_API_KEY` の Sealed Secret、`APP_DB_PATH`、PVC 上の `settings.yaml` の `reminderPollIntervalSeconds`）は**反映済み**。手順は `docs/setup/deploy.md`。
 
-**⚠ Issue 起票（F-37）のクラスタ側の前提は 2 つとも未反映。** どちらも入れるまで、スレッドで「Issue にして」と頼んでも失敗する:
+**⚠ Issue 起票（F-37）は 2026-09-18 にデプロイ済み（`version: 4f13665`、起動ログで確認）。クラスタ側の前提は 2 つとも未反映。** どちらも入れるまで、スレッドで「Issue にして」と頼んでも失敗する:
 
 - `GITHUB_TOKEN` の Sealed Secret（fine-grained PAT、対象リポジトリの `issues: write` のみ）。**任意の環境変数なので、無くても起動はする** —— 失敗するのは頼まれた瞬間だけで、起動ログには出ない
 - PVC 上の `settings.yaml` の `issueTracker.repositories`（ArgoCD の管理外なので手で置く）。例: `"1478391009934180352": Im-neko/stocktrade`
