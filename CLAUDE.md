@@ -20,7 +20,7 @@
 
 **⚠ フェーズ 3.5・4 は載ってはいるが、まだ使われていない。** 起動（`version: f6cc2bd`）とポーラーの開始は確認済みだが、**リマインダーの着信・`/skill`・`/persona`・キュレーターの発火は誰も踏んでいない。** 最初に触ったときに壊れている可能性が一番高いのはそこ。
 
-**⚠ 通知の宛先指定（D-31）は 2026-09-18 に実装したが、まだ push していない。** CI（typecheck / lint / test）はローカルで通っている。**クラスタ側の前提が 2 つ未反映**: PVC 上の `settings.yaml` の `notification.channels`（ArgoCD の管理外なので手で置く）と、`NOTIFY_TOKENS` への `money-topic:<トークン>` の追加（Sealed Secret）。**どちらも入れないと、宛先を指定した通知は 400 か 401 で弾かれる。** 呼ぶ側は別リポジトリの money-topic（`/home/yui/apps/money-topic`）。
+**⚠ 通知の宛先指定（D-31）は 2026-09-18 に main へ入った（`532b0f9`）。クラスタ側の前提は 2 つとも未反映のまま**: PVC 上の `settings.yaml` の `notification.channels`（ArgoCD の管理外なので手で置く）と、`NOTIFY_TOKENS` への `money-topic:<トークン>` の追加（Sealed Secret）。**どちらも入れないと、宛先を指定した通知は 400 か 401 で弾かれる。** 呼ぶ側は別リポジトリの money-topic（`/home/yui/apps/money-topic`）。
 
 クラスタ側の前提（`BRAVE_SEARCH_API_KEY` の Sealed Secret、`APP_DB_PATH`、PVC 上の `settings.yaml` の `reminderPollIntervalSeconds`）は**反映済み**。手順は `docs/setup/deploy.md`。
 
