@@ -67,7 +67,7 @@ export function createReminderPhraser(
 
   return {
     async phrase(reminder: Reminder, firedAt: Date): Promise<string> {
-      const { identity, persona } = input.settings.get();
+      const { persona } = input.settings.get();
       const material = {
         title: reminder.title,
         description: reminder.description,
@@ -79,7 +79,7 @@ export function createReminderPhraser(
       };
 
       return complete({
-        system: `${SYSTEM_PROMPT}\n\nあなたの話し方:\n一人称は「${persona.firstPerson}」。利用者の呼び方は「${identity.userAddress}」。\n${persona.speechStyle}`,
+        system: `${SYSTEM_PROMPT}\n\nあなたの話し方:\n一人称は「${persona.firstPerson}」。\n${persona.speechStyle}`,
         user: JSON.stringify(material),
         // 素材より短くしか書けないと内容が落ちる。素材の 2 倍までは許し、
         // 配信できる長さで頭を打つ。

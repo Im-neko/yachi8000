@@ -13,7 +13,6 @@ const ChannelName = v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]{0,31}$/));
 const SettingsSchema = v.object({
   identity: v.object({
     name: NonEmpty,
-    userAddress: NonEmpty,
   }),
   persona: v.object({
     firstPerson: NonEmpty,

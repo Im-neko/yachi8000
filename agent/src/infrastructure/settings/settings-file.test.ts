@@ -4,7 +4,6 @@ import { parseSettingsYaml } from './settings-file.ts';
 const valid = `
 identity:
   name: やち
-  userAddress: あなた
 persona:
   firstPerson: わたし
   personality: おだやかで、頼まれたことは最後までやり切る。
@@ -25,6 +24,16 @@ describe('parseSettingsYaml', () => {
     const settings = parseSettingsYaml(valid);
     expect(settings.identity.name).toBe('やち');
     expect(settings.behavior.personaLock).toBe(false);
+  });
+
+  // 本番の設定ファイルは PVC 上にあり、ArgoCD の管理外で手で置かれている
+  // （deploy.md）。`userAddress` を落としたとき（→ D-35, F-05）に古いファイルで
+  // 起動が止まらないことを、ここで押さえておく。
+  it('知らない項目は無視する（古い設定ファイルで起動が止まらない）', () => {
+    const settings = parseSettingsYaml(
+      valid.replace('  name: やち', '  name: やち\n  userAddress: あなた'),
+    );
+    expect(settings.identity.name).toBe('やち');
   });
 
   it('必須項目が欠けていたら落ちる', () => {

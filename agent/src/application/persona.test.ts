@@ -17,7 +17,7 @@ import {
 } from './persona.ts';
 
 const PROFILE = {
-  identity: { name: 'やち', userAddress: 'あなた' },
+  identity: { name: 'やち' },
   persona: {
     firstPerson: 'わたし',
     personality: 'おだやか。',

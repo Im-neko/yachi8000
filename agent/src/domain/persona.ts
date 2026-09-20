@@ -5,8 +5,6 @@
 export interface PersonaProfile {
   /** アシスタントの名前。 */
   assistantName: string;
-  /** 利用者の呼び方。 */
-  userAddress: string;
   /** アシスタントの一人称。 */
   firstPerson: string;
   /** 性格の記述。 */
@@ -67,7 +65,6 @@ export function composePersonaPrompt(input: ComposePersonaInput): string {
       '# 人格',
       `- あなたの名前は「${profile.assistantName}」です。`,
       `- 一人称は「${profile.firstPerson}」です。`,
-      `- 利用者のことは「${profile.userAddress}」と呼びます。`,
       '',
       '## 性格',
       profile.personality.trim(),

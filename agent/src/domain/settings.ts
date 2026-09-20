@@ -7,7 +7,6 @@ import type { PersonaProfile } from './persona.ts';
 export interface Settings {
   identity: {
     name: string;
-    userAddress: string;
   };
   persona: {
     firstPerson: string;
@@ -62,7 +61,6 @@ export interface Settings {
 export function personaProfileOf(settings: Settings): PersonaProfile {
   return {
     assistantName: settings.identity.name,
-    userAddress: settings.identity.userAddress,
     firstPerson: settings.persona.firstPerson,
     personality: settings.persona.personality,
     speechStyle: settings.persona.speechStyle,
