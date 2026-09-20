@@ -60,6 +60,23 @@ agent が受け取るのは接続情報だけ:
    **アプリ側には認証のコードが無い**（入れない決定をしている）ので、**守りは ingress にしか無い**。
    agent を ingress で公開していないなら今は困らないが、公開した瞬間に開く。**公開の有無は GitOps 側を見ないと分からない**
 
+   配線は GitOps リポジトリ側に 2 つある（2026-09-20 に実施。詳細は D-37）:
+
+   - **認証基盤側**: proxy provider（`forward_single`）・application・埋め込み outpost への紐づけを
+     blueprint（ConfigMap）で宣言し、`yachi8000.ideta.net/outpost.goauthentik.io` を
+     認証基盤の namespace の Ingress で受ける。**Ingress のバックエンドは同じ namespace の
+     Service しか指せない**ので、この 1 本だけはアプリ側の chart に置けない
+   - **アプリ側**: Ingress を 2 本に分ける。`/` には forward auth の annotation を付け、
+     **`/api/v1/notify`・`/api/v1/voice/status`・`/api/v1/health` だけを別 Ingress で素通しにする**。
+     annotation は Ingress 単位でしか効かないので、同じホストで守る場所と守らない場所を
+     分けるには 2 本要る
+
+   **`X-Forwarded-Host` は `auth-snippet` では渡せない。** クラスタには ingress-nginx が 2 つあり
+   （GitOps 管理のものと Kubernetes ディストリビューション同梱のもの）、どちらも class `nginx` の
+   Ingress を admission で検証する。後者は snippet を許可していないため、`*-snippet` の
+   annotation を付けた Ingress は**拒否されて反映されない**。ConfigMap を指す
+   `auth-proxy-set-headers` なら両方で通る
+
 **通知 API（`/api/v1/notify`）は別**。あちらは自前の Bearer トークンを持ち続ける —— ingress の認証は
 クラスタ内から Pod へ直接来た要求には効かないため、「発話させられる入口」の守りにはならない（INV-6）。
 
