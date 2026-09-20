@@ -8,16 +8,23 @@ import {
   useSkill,
   useTool,
 } from '@flue/runtime';
+import { speakerProfile } from '../application/person.ts';
 import { buildPersonaPrompt } from '../application/persona.ts';
 import { mountableSkills } from '../application/skill.ts';
-import { personaDependencies, skillDependencies } from '../composition-root.ts';
+import {
+  personaDependencies,
+  personDependencies,
+  skillDependencies,
+} from '../composition-root.ts';
 import { env } from '../config/env.ts';
 import type { IssueSource } from '../domain/issue.ts';
-import type { TenantId } from '../domain/tenant.ts';
+import { renderSpeakerSection } from '../domain/person.ts';
+import { parseSpeakerId } from '../domain/speaker.ts';
 import { LLM_PROVIDER_ID } from '../infrastructure/llm/provider-id.ts';
 import { logger } from '../observability/logger.ts';
 import { createIssueTools } from '../tools/issue.tools.ts';
 import { createMemoryTools } from '../tools/memory.tools.ts';
+import { createPersonTools } from '../tools/person.tools.ts';
 import { createPersonaTools } from '../tools/persona.tools.ts';
 import { createReminderTools } from '../tools/reminder.tools.ts';
 import { createSearchTools } from '../tools/search.tools.ts';
@@ -112,11 +119,11 @@ ${thread.source.text}
  * application 側にあり、ここは Flue への受け渡しだけをする。
  *
  * **1 件の壊れた行で render 全体を落とさない。** `defineSkill()` が投げると
- * そのテナントは毎ターン会話できなくなり、`/skill disable` を打つ経路まで
- * 塞がる。落とした事実は ERROR に出す（INV-7）。
+ * 毎ターン会話できなくなり、`/skill disable` を打つ経路まで塞がる。
+ * 落とした事実は ERROR に出す（INV-7）。
  */
-function useApprovedSkills(tenantId: TenantId): void {
-  for (const skill of mountableSkills(skillDependencies, tenantId)) {
+function useApprovedSkills(): void {
+  for (const skill of mountableSkills(skillDependencies)) {
     try {
       useSkill(
         defineSkill({
@@ -127,7 +134,7 @@ function useApprovedSkills(tenantId: TenantId): void {
       );
     } catch (error) {
       logger.error(
-        { err: error, tenantId, skillId: skill.id, name: skill.name },
+        { err: error, skillId: skill.id, name: skill.name },
         'Skipped an approved skill that Flue rejected — disable or fix it',
       );
     }
@@ -148,6 +155,15 @@ const INSTRUCTIONS = `
 - 会話の履歴は自動的に圧縮され、古い部分は失われます。
   後の会話でも覚えておくべきことは remember_fact で明示的に保存してください。
 - 過去に覚えたことが必要になったら recall_memories で思い出してください。
+- 記憶は全員ぶんがひとつの場所にあります。誰の話だったかを混同しないでください。
+
+# 話している相手
+- 複数の人が同じあなたに話しかけます。プロンプトの「話しかけている人」を見て、
+  今の相手に合わせて応じてください。
+- その人と話すたびに踏まえたいこと（呼び方の好み・接し方）は
+  remember_about_person に入れます。会話に出てきた第三者の話や一度きりの
+  出来事は remember_fact です。
+- 「〇〇って呼んで」と頼まれたら set_person_name を使ってください。
 
 # 調べもの
 - 自分の知識で足りないこと、最近の出来事、具体的な製品やエラーの調べ物は
@@ -174,35 +190,36 @@ const INSTRUCTIONS = `
   record_persona_change で記録してください。その場かぎりの指示には使いません。
 `.trim();
 
-export function Yachi({ id }: AgentProps) {
-  const tenantId = id as TenantId;
-
+export function Yachi(_props: AgentProps) {
   useModel(MODEL, { compaction: { model: MODEL } });
 
   const delivery = useDelivery();
   const attributes =
     delivery.kind === 'signal' ? delivery.attributes : undefined;
-  const speakerId = attributes?.speakerId;
+  const speakerId = parseSpeakerId(attributes?.speakerId);
   const speakerName = attributes?.speakerName;
   const channelId = attributes?.channelId;
   const guildId = attributes?.guildId;
 
-  for (const tool of createMemoryTools({ tenantId, speakerId })) {
-    useTool(tool);
-  }
-  for (const tool of createReminderTools({
-    tenantId,
-    channelId,
-    guildId,
-    speakerId,
-  })) {
+  for (const tool of createMemoryTools({ speakerId })) {
     useTool(tool);
   }
   for (const tool of createSearchTools()) {
     useTool(tool);
   }
-  for (const tool of createPersonaTools({ tenantId })) {
+  for (const tool of createPersonaTools()) {
     useTool(tool);
+  }
+
+  // 相手が判別できるときだけ配る（F-05）。「誰の予定か」「誰についての
+  // メモか」が決まらないものを書かせない。
+  if (speakerId !== undefined) {
+    for (const tool of createReminderTools({ channelId, guildId, speakerId })) {
+      useTool(tool);
+    }
+    for (const tool of createPersonTools({ speakerId })) {
+      useTool(tool);
+    }
   }
 
   // スレッドの元投稿が読めたときだけ起票の道具を配る（→ D-33）。
@@ -220,13 +237,19 @@ export function Yachi({ id }: AgentProps) {
     }
   }
 
-  useApprovedSkills(tenantId);
+  useApprovedSkills();
+
+  const profile =
+    speakerId === undefined
+      ? undefined
+      : speakerProfile(personDependencies, speakerId);
 
   return `# 利用可能な情報
 - Date: ${formatCurrentDateTime()} (JST, UTC+9)
-- TenantID: ${tenantId}
-${speakerName ? `- 話しかけている人: ${speakerName}\n` : ''}${threadSource ? renderThreadSource(threadSource) : ''}
-${buildPersonaPrompt(personaDependencies, tenantId)}
+
+${renderSpeakerSection(profile, typeof speakerName === 'string' ? speakerName : undefined)}
+${threadSource ? renderThreadSource(threadSource) : ''}
+${buildPersonaPrompt(personaDependencies)}
 
 ${INSTRUCTIONS}`;
 }

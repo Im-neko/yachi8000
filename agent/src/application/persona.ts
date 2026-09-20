@@ -6,7 +6,6 @@ import type {
 } from '../domain/ports/persona-diff-store.ts';
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
 import { personaProfileOf } from '../domain/settings.ts';
-import type { TenantId } from '../domain/tenant.ts';
 
 /** 履歴として見せる最大件数。 */
 const HISTORY_LIMIT = 30;
@@ -25,13 +24,10 @@ export interface PersonaDependencies {
  * 固定モード（F-34）では差分ストアを**呼ばない**。読んでから捨てるのでは
  * なく読まないことが、D-13 でいう決定的な防御そのもの。
  */
-export function buildPersonaPrompt(
-  deps: PersonaDependencies,
-  tenantId: TenantId,
-): string {
+export function buildPersonaPrompt(deps: PersonaDependencies): string {
   const settings = deps.settings.get();
   const locked = settings.behavior.personaLock;
-  const diffs = locked ? [] : deps.diffs.list(tenantId);
+  const diffs = locked ? [] : deps.diffs.list();
   return composePersonaPrompt({
     profile: personaProfileOf(settings),
     diffs,
@@ -53,7 +49,7 @@ export function isPersonaLocked(deps: PersonaDependencies): boolean {
  */
 export function recordPersonaChange(
   deps: PersonaDependencies,
-  input: { tenantId: TenantId; instruction: string; reason: string },
+  input: { instruction: string; reason: string },
 ): PersonaDiff {
   const instruction = input.instruction.trim();
   const reason = input.reason.trim();
@@ -66,17 +62,9 @@ export function recordPersonaChange(
     );
   }
 
-  const diff = deps.diffs.record({
-    tenantId: input.tenantId,
-    instruction,
-    reason,
-  });
+  const diff = deps.diffs.record({ instruction, reason });
   deps.log.info(
-    {
-      tenantId: input.tenantId,
-      diffId: diff.id,
-      applied: !isPersonaLocked(deps),
-    },
+    { diffId: diff.id, applied: !isPersonaLocked(deps) },
     'Recorded a persona change',
   );
   return diff;
@@ -85,35 +73,25 @@ export function recordPersonaChange(
 /** 変化の一覧（F-33）。巻き戻し済みのものも含める。 */
 export function listPersonaChanges(
   deps: PersonaDependencies,
-  tenantId: TenantId,
 ): readonly PersonaDiffRecord[] {
-  return deps.diffs.history(tenantId, HISTORY_LIMIT);
+  return deps.diffs.history(HISTORY_LIMIT);
 }
 
 /** 個別の巻き戻し（F-33）。 */
 export function revertPersonaChange(
   deps: PersonaDependencies,
-  input: { tenantId: TenantId; id: string },
+  id: string,
 ): boolean {
-  const reverted = deps.diffs.revert(input.tenantId, input.id);
+  const reverted = deps.diffs.revert(id);
   if (reverted) {
-    deps.log.info(
-      { tenantId: input.tenantId, diffId: input.id },
-      'Reverted a persona change',
-    );
+    deps.log.info({ diffId: id }, 'Reverted a persona change');
   }
   return reverted;
 }
 
 /** 既定の人格までの一括巻き戻し（F-33）。設定ファイルには触らない（INV-9）。 */
-export function resetPersona(
-  deps: PersonaDependencies,
-  tenantId: TenantId,
-): number {
-  const reverted = deps.diffs.revertAll(tenantId);
-  deps.log.info(
-    { tenantId, reverted },
-    'Reset the persona to the settings file',
-  );
+export function resetPersona(deps: PersonaDependencies): number {
+  const reverted = deps.diffs.revertAll();
+  deps.log.info({ reverted }, 'Reset the persona to the settings file');
   return reverted;
 }

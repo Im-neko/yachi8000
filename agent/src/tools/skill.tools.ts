@@ -3,11 +3,6 @@ import * as v from 'valibot';
 import { listSkills, proposeSkill } from '../application/skill.ts';
 import { skillDependencies } from '../composition-root.ts';
 import type { SkillCandidate } from '../domain/skill.ts';
-import type { TenantId } from '../domain/tenant.ts';
-
-export interface SkillCuratorToolsContext {
-  tenantId: TenantId;
-}
 
 function formatCandidate(candidate: SkillCandidate): string {
   return `- ${candidate.name} [${candidate.status}/${candidate.kind}] ${candidate.description}`;
@@ -22,15 +17,15 @@ function formatCandidate(candidate: SkillCandidate): string {
  * LLM は分類と要約だけをして、書き込みは受け取った構造化された結果を
  * 決定的なコードが行う（INV-3）。
  */
-export function createSkillCuratorTools(ctx: SkillCuratorToolsContext) {
+export function createSkillCuratorTools() {
   const list = defineTool({
     name: 'list_skills',
     description:
-      'このテナントに既にあるスキル（承認済み・保留中・却下済み・無効化済み）を一覧します。' +
+      '既にあるスキル（承認済み・保留中・却下済み・無効化済み）を一覧します。' +
       '**提案の前に必ず呼んでください。** 却下された名前も名前を占有しているので、同じ名前では登録できません。',
     input: v.object({}),
     run() {
-      const skills = listSkills(skillDependencies, ctx.tenantId, [
+      const skills = listSkills(skillDependencies, [
         'pending',
         'approved',
         'rejected',
@@ -64,7 +59,6 @@ export function createSkillCuratorTools(ctx: SkillCuratorToolsContext) {
     }),
     run({ data }) {
       const candidate = proposeSkill(skillDependencies, {
-        tenantId: ctx.tenantId,
         name: data.name,
         description: data.description,
         instructions: data.instructions,

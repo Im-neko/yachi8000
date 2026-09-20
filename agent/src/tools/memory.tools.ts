@@ -8,12 +8,16 @@ import {
 } from '../application/memory.ts';
 import { memoryDependencies } from '../composition-root.ts';
 import type { MemoryRecord } from '../domain/memory.ts';
-import type { TenantId } from '../domain/tenant.ts';
+import type { SpeakerId } from '../domain/speaker.ts';
 
 export interface MemoryToolsContext {
-  tenantId: TenantId;
-  /** 誰の発言に紐づく記憶か。分からなければ undefined。 */
-  speakerId: string | undefined;
+  /**
+   * 誰の発言に紐づく記憶か（F-05）。分からなければ undefined。
+   *
+   * **分離の鍵ではない**（→ D-35）。保存時に帰属として残すだけで、想起は
+   * 既定で全体から引く。
+   */
+  speakerId: SpeakerId | undefined;
 }
 
 function formatRecordedAt(iso: string): string {
@@ -35,6 +39,10 @@ function formatRecord(record: MemoryRecord): string {
  * 会話履歴は Flue の自動圧縮で落ちていくので、覚えておくべき事実は
  * `remember_fact` を明示的に呼ばないと消える。逆に、毎ターン自動で
  * 書き出すことはしない —— 何でも溜める置き場にすると想起が効かなくなる。
+ *
+ * **話しかけてくる相手そのものについては、こちらではなくプロフィール**
+ * （F-05, `person.tools.ts`）。ここは話題に出る第三者を含む事実の置き場で、
+ * 検索して引くもの。プロフィールは毎ターン必ず載るもの。
  */
 export function createMemoryTools(ctx: MemoryToolsContext) {
   const remember = defineTool({
@@ -49,7 +57,6 @@ export function createMemoryTools(ctx: MemoryToolsContext) {
     }),
     async run({ data }) {
       const record = await rememberFact(memoryDependencies, {
-        tenantId: ctx.tenantId,
         content: data.content,
         ...(ctx.speakerId === undefined ? {} : { speakerId: ctx.speakerId }),
       });
@@ -60,14 +67,20 @@ export function createMemoryTools(ctx: MemoryToolsContext) {
   const recall = defineTool({
     name: 'recall_memories',
     description:
-      '長期記憶を意味検索します。利用者について過去に覚えたことを思い出す必要があるときに使ってください。',
+      '長期記憶を意味検索します。過去に覚えたことを思い出す必要があるときに使ってください。' +
+      '既定では全員ぶんの記憶から探します。' +
+      'only_this_person を true にすると、**今話している相手が言ったこと**だけに絞ります —— ' +
+      '「私が前に言ったやつ」のように、その人自身の発言だと分かっているときにだけ使ってください。',
     input: v.object({
       query: v.pipe(v.string(), v.minLength(1)),
+      only_this_person: v.optional(v.boolean()),
     }),
     async run({ data }) {
       const hits = await recallMemories(memoryDependencies, {
-        tenantId: ctx.tenantId,
         query: data.query,
+        ...(data.only_this_person && ctx.speakerId !== undefined
+          ? { speakerId: ctx.speakerId }
+          : {}),
       });
       if (hits.length === 0) return '関連する記憶は見つかりませんでした。';
       return hits
@@ -82,7 +95,7 @@ export function createMemoryTools(ctx: MemoryToolsContext) {
       '長期記憶を新しい順に一覧します。「何を覚えている？」と聞かれたときや、削除対象の ID を調べるときに使ってください。',
     input: v.object({}),
     async run() {
-      const records = await listMemories(memoryDependencies, ctx.tenantId);
+      const records = await listMemories(memoryDependencies);
       if (records.length === 0) return 'まだ何も覚えていません。';
       return records.map(formatRecord).join('\n');
     },
@@ -97,10 +110,7 @@ export function createMemoryTools(ctx: MemoryToolsContext) {
       id: v.pipe(v.string(), v.uuid()),
     }),
     async run({ data }) {
-      const removed = await forgetMemory(memoryDependencies, {
-        tenantId: ctx.tenantId,
-        id: data.id,
-      });
+      const removed = await forgetMemory(memoryDependencies, data.id);
       return removed
         ? `記憶 ${data.id} を削除しました。`
         : `記憶 ${data.id} は見つかりませんでした。`;

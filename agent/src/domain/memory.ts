@@ -1,4 +1,4 @@
-import type { TenantId } from './tenant.ts';
+import type { SpeakerId } from './speaker.ts';
 
 /**
  * 長期記憶の 1 件（F-30）。
@@ -8,11 +8,15 @@ import type { TenantId } from './tenant.ts';
  */
 export interface MemoryRecord {
   id: string;
-  tenantId: TenantId;
   /** 記録した内容。 */
   content: string;
-  /** 誰についての / 誰が言った記憶か。分からなければ undefined。 */
-  speakerId: string | undefined;
+  /**
+   * 誰が言った記憶か（F-05）。分からなければ undefined。
+   *
+   * **分離のための鍵ではなく属性**（→ D-35）。想起は既定で全体から引く ——
+   * 誰が言ったかで閉じると、人から聞いた話を別の人に答えられなくなる。
+   */
+  speakerId: SpeakerId | undefined;
   /** ISO 8601。 */
   recordedAt: string;
 }

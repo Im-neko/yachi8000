@@ -1,8 +1,5 @@
 import type { PersonaDiff } from '../persona.ts';
-import type { TenantId } from '../tenant.ts';
-
 export interface RecordPersonaDiffInput {
-  tenantId: TenantId;
   /** 応答に追加で効かせる指示。 */
   instruction: string;
   /** 何を契機に変わったか（F-33）。 */
@@ -21,14 +18,14 @@ export interface RecordPersonaDiffInput {
  */
 export interface PersonaDiffStore {
   /** 巻き戻されていない差分を、記録順に返す。 */
-  list(tenantId: TenantId): readonly PersonaDiff[];
+  list(): readonly PersonaDiff[];
   /** 巻き戻したものも含めて履歴を新しい順に返す（F-33 の「変化の一覧」）。 */
-  history(tenantId: TenantId, limit: number): readonly PersonaDiffRecord[];
+  history(limit: number): readonly PersonaDiffRecord[];
   record(input: RecordPersonaDiffInput): PersonaDiff;
-  /** 巻き戻せたら true、そのテナントに無い / 既に巻き戻し済みなら false。 */
-  revert(tenantId: TenantId, id: string): boolean;
+  /** 巻き戻せたら true、無い / 既に巻き戻し済みなら false。 */
+  revert(id: string): boolean;
   /** 既定の人格まで一括で巻き戻し、戻した件数を返す。 */
-  revertAll(tenantId: TenantId): number;
+  revertAll(): number;
 }
 
 export interface PersonaDiffRecord extends PersonaDiff {

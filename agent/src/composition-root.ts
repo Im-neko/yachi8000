@@ -2,6 +2,7 @@ import type { Client } from 'discord.js';
 import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
+import type { PersonDependencies } from './application/person.ts';
 import type { PersonaDependencies } from './application/persona.ts';
 import type {
   ReminderDeliveryDependencies,
@@ -26,6 +27,7 @@ import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
 import { createReminderPhraser } from './infrastructure/llm/reminder-phraser.ts';
 import { createPgvectorMemoryStore } from './infrastructure/memory/pgvector-memory-store.ts';
+import { createSqlitePersonProfileStore } from './infrastructure/person/sqlite-person-profile-store.ts';
 import { createSqlitePersonaDiffStore } from './infrastructure/persona/sqlite-persona-diff-store.ts';
 import { createSqliteReminderStore } from './infrastructure/reminder/sqlite-reminder-store.ts';
 import { createBraveSearcher } from './infrastructure/search/brave-search.ts';
@@ -65,6 +67,12 @@ export const memoryDependencies: MemoryDependencies = { store: memoryStore };
 export const personaDependencies: PersonaDependencies = {
   settings,
   diffs: createSqlitePersonaDiffStore(appDb),
+  log: logger,
+};
+
+/** 話しかけてくる相手のプロフィール（F-05）。 */
+export const personDependencies: PersonDependencies = {
+  store: createSqlitePersonProfileStore(appDb),
   log: logger,
 };
 

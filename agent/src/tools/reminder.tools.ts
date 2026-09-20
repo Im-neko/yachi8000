@@ -13,16 +13,20 @@ import {
   formatJstDateTime,
   type Reminder,
 } from '../domain/reminder.ts';
-import type { TenantId } from '../domain/tenant.ts';
+import type { SpeakerId } from '../domain/speaker.ts';
 
 export interface ReminderToolsContext {
-  tenantId: TenantId;
   /** 発火時の配信先。どのチャンネルの会話か分からない入口では undefined。 */
   channelId: string | undefined;
   /** ギルドの会話なら、そのギルド。DM なら undefined。 */
   guildId: string | undefined;
-  /** 登録した人。分からなければ undefined。 */
-  speakerId: string | undefined;
+  /**
+   * 登録する人（→ D-35）。**一覧・取り消し・上限はこの人で絞る。**
+   *
+   * 話者が分からない入口ではこのツール群を配らない（誰の予定か決まらない
+   * ものを登録させない）。
+   */
+  speakerId: SpeakerId;
 }
 
 function formatReminder(reminder: Reminder): string {
@@ -40,6 +44,8 @@ function formatReminder(reminder: Reminder): string {
  * 発火の文面づくりは poller 側の仕事で、ここには無い。保存したものが
  * その**素材**になる（→ D-30）ので、**利用者の言葉を要約して保存しない**ことを
  * description で念押ししている。ここで痩せた文面は、後から取り返せない。
+ *
+ * **入れ物は全体でひとつだが、見えるのは自分の分だけ**（→ D-35）。
  */
 export function createReminderTools(ctx: ReminderToolsContext) {
   const schedule = defineTool({
@@ -61,7 +67,6 @@ export function createReminderTools(ctx: ReminderToolsContext) {
         );
       }
       const reminder = scheduleReminder(reminderDependencies, {
-        tenantId: ctx.tenantId,
         title: data.title,
         description: data.description,
         dueAtJst: data.due_at,
@@ -102,7 +107,6 @@ export function createReminderTools(ctx: ReminderToolsContext) {
         time: data.time,
       });
       const reminder = scheduleRecurringReminder(reminderDependencies, {
-        tenantId: ctx.tenantId,
         title: data.title,
         description: data.description,
         recurrence,
@@ -118,10 +122,11 @@ export function createReminderTools(ctx: ReminderToolsContext) {
   const list = defineTool({
     name: 'list_reminders',
     description:
-      'まだ鳴っていないリマインダーを期限の近い順に一覧します。繰り返しのものは規則と次回の時刻を並べます。削除対象の ID を調べるときにも使ってください。',
+      'この人がまだ鳴らしていないリマインダーを期限の近い順に一覧します。繰り返しのものは規則と次回の時刻を並べます。削除対象の ID を調べるときにも使ってください。' +
+      '他の人が登録したリマインダーは出てきません。',
     input: v.object({}),
     run() {
-      const reminders = listReminders(reminderDependencies, ctx.tenantId);
+      const reminders = listReminders(reminderDependencies, ctx.speakerId);
       if (reminders.length === 0)
         return '予定しているリマインダーはありません。';
       return reminders.map(formatReminder).join('\n');
@@ -131,18 +136,19 @@ export function createReminderTools(ctx: ReminderToolsContext) {
   const cancel = defineTool({
     name: 'cancel_reminder',
     description:
-      'リマインダーを 1 件削除します。繰り返しのものは、これで止めるまで鳴り続けます。ID は list_reminders が返す角括弧の中の値です。',
+      'リマインダーを 1 件削除します。繰り返しのものは、これで止めるまで鳴り続けます。ID は list_reminders が返す角括弧の中の値です。' +
+      '削除できるのはこの人が登録したものだけです。',
     input: v.object({
       id: v.pipe(v.string(), v.uuid()),
     }),
     run({ data }) {
       const removed = cancelReminder(reminderDependencies, {
-        tenantId: ctx.tenantId,
+        createdBy: ctx.speakerId,
         id: data.id,
       });
       return removed
         ? `リマインダー ${data.id} を削除しました。`
-        : `リマインダー ${data.id} は見つかりませんでした（既に鳴ったか、別の会話のものです）。`;
+        : `リマインダー ${data.id} は見つかりませんでした（既に鳴ったか、他の人が登録したものです）。`;
     },
   });
 

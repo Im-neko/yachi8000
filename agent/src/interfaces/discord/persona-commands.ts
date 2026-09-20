@@ -13,7 +13,7 @@ import {
   revertPersonaChange,
 } from '../../application/persona.ts';
 import type { PersonaDiffRecord } from '../../domain/ports/persona-diff-store.ts';
-import { tenantIdOfInteraction } from './tenant.ts';
+import { isInGuild } from './guild-only.ts';
 
 const AUTOCOMPLETE_LIMIT = 25;
 
@@ -69,8 +69,7 @@ export async function handlePersonaCommand(
   interaction: ChatInputCommandInteraction,
   deps: PersonaDependencies,
 ): Promise<void> {
-  const tenantId = tenantIdOfInteraction(interaction);
-  if (!tenantId) {
+  if (!isInGuild(interaction)) {
     await interaction.reply({
       content: 'このコマンドはサーバ内で実行してください。',
       flags: MessageFlags.Ephemeral,
@@ -81,7 +80,7 @@ export async function handlePersonaCommand(
   const subcommand = interaction.options.getSubcommand();
 
   if (subcommand === 'list') {
-    const changes = listPersonaChanges(deps, tenantId);
+    const changes = listPersonaChanges(deps);
     const lock = isPersonaLocked(deps)
       ? '\n\n**固定モードが有効です。** 記録は続いていますが、応答には反映されていません。'
       : '';
@@ -96,7 +95,7 @@ export async function handlePersonaCommand(
   }
 
   if (subcommand === 'reset') {
-    const reverted = resetPersona(deps, tenantId);
+    const reverted = resetPersona(deps);
     await interaction.reply({
       content: `人格の変化を ${reverted} 件巻き戻し、設定ファイルの既定の人格に戻しました。`,
       flags: MessageFlags.Ephemeral,
@@ -106,7 +105,7 @@ export async function handlePersonaCommand(
 
   if (subcommand === 'revert') {
     const id = interaction.options.getString('change', true);
-    const reverted = revertPersonaChange(deps, { tenantId, id });
+    const reverted = revertPersonaChange(deps, id);
     await interaction.reply({
       content: reverted
         ? '巻き戻しました。次のターン以降の応答から外れます。'
@@ -126,14 +125,13 @@ export async function handlePersonaAutocomplete(
   interaction: AutocompleteInteraction,
   deps: PersonaDependencies,
 ): Promise<void> {
-  const tenantId = tenantIdOfInteraction(interaction);
-  if (!tenantId) {
+  if (!isInGuild(interaction)) {
     await interaction.respond([]);
     return;
   }
 
   const typed = interaction.options.getFocused().toLowerCase();
-  const choices = listPersonaChanges(deps, tenantId)
+  const choices = listPersonaChanges(deps)
     .filter((change) => change.revertedAt === undefined)
     .filter((change) => change.instruction.toLowerCase().includes(typed))
     .slice(0, AUTOCOMPLETE_LIMIT)

@@ -9,11 +9,9 @@ import type {
   SkillKind,
   SkillStatus,
 } from '../../domain/skill.ts';
-import type { TenantId } from '../../domain/tenant.ts';
 
 interface SkillRow {
   id: string;
-  tenant_id: string;
   name: string;
   description: string;
   instructions: string;
@@ -26,7 +24,6 @@ interface SkillRow {
 function toCandidate(row: SkillRow): SkillCandidate {
   return {
     id: row.id,
-    tenantId: row.tenant_id as TenantId,
     name: row.name,
     description: row.description,
     instructions: row.instructions,
@@ -49,23 +46,24 @@ function placeholders(count: number): string {
  * しないと、非同期に届く提案と承認操作の順序で結果が変わる
  * （→ 04-architecture.md の「共有される書き込み先の棚卸し」が求める
  * 「提案は fire-and-forget。承認との競合順序を決めておく」）。
+ *
+ * **入れ物は全体でひとつ**（→ D-35）。どの会話から提案されたスキルも同じ
+ * 一覧に並び、承認すればどこでも効く。
  */
 export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
   const insert = db.prepare(
     `INSERT INTO skills
-       (id, tenant_id, name, description, instructions, kind, status, proposed_at, decided_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, NULL)`,
+       (id, name, description, instructions, kind, status, proposed_at, decided_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL)`,
   );
-  const selectById = db.prepare(
-    `SELECT * FROM skills WHERE tenant_id = ? AND id = ?`,
-  );
+  const selectById = db.prepare(`SELECT * FROM skills WHERE id = ?`);
   const rejectPending = db.prepare(
     `UPDATE skills SET status = 'rejected', decided_at = ?
-      WHERE tenant_id = ? AND status = 'pending'`,
+      WHERE status = 'pending'`,
   );
 
-  function get(tenantId: TenantId, id: string): SkillCandidate | undefined {
-    const row = selectById.get(tenantId, id) as unknown as SkillRow | undefined;
+  function get(id: string): SkillCandidate | undefined {
+    const row = selectById.get(id) as unknown as SkillRow | undefined;
     return row ? toCandidate(row) : undefined;
   }
 
@@ -73,7 +71,6 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
     propose(input: ProposeSkillInput): SkillCandidate {
       const candidate: SkillCandidate = {
         id: randomUUID(),
-        tenantId: input.tenantId,
         name: input.name.trim(),
         description: input.description.trim(),
         instructions: input.instructions.trim(),
@@ -85,7 +82,6 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
       try {
         insert.run(
           candidate.id,
-          candidate.tenantId,
           candidate.name,
           candidate.description,
           candidate.instructions,
@@ -93,7 +89,7 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
           candidate.proposedAt,
         );
       } catch (error) {
-        // UNIQUE (tenant_id, name) の衝突。却下済みの名前も残っているので、
+        // UNIQUE (name) の衝突。却下済みの名前も残っているので、
         // 「同じ名前で出し直せない」ことを呼び出し側へそのまま伝える。
         throw new Error(
           `スキル名 "${candidate.name}" は既に使われています（却下済みのものも名前を占有します）。別の名前にしてください。(${(error as Error).message})`,
@@ -102,25 +98,21 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
       return candidate;
     },
 
-    list(
-      tenantId: TenantId,
-      statuses: readonly SkillStatus[],
-    ): readonly SkillCandidate[] {
+    list(statuses: readonly SkillStatus[]): readonly SkillCandidate[] {
       if (statuses.length === 0) return [];
       const rows = db
         .prepare(
           `SELECT * FROM skills
-            WHERE tenant_id = ? AND status IN (${placeholders(statuses.length)})
+            WHERE status IN (${placeholders(statuses.length)})
             ORDER BY proposed_at ASC`,
         )
-        .all(tenantId, ...statuses) as unknown as SkillRow[];
+        .all(...statuses) as unknown as SkillRow[];
       return rows.map(toCandidate);
     },
 
     get,
 
     transition(
-      tenantId: TenantId,
       id: string,
       from: readonly SkillStatus[],
       to: SkillStatus,
@@ -129,32 +121,27 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
       const changed = db
         .prepare(
           `UPDATE skills SET status = ?, decided_at = ?
-            WHERE tenant_id = ? AND id = ? AND status IN (${placeholders(from.length)})`,
+            WHERE id = ? AND status IN (${placeholders(from.length)})`,
         )
-        .run(to, new Date().toISOString(), tenantId, id, ...from).changes;
+        .run(to, new Date().toISOString(), id, ...from).changes;
       if (changed === 0) return undefined;
-      return get(tenantId, id);
+      return get(id);
     },
 
-    rejectAllPending(tenantId: TenantId): number {
-      return Number(
-        rejectPending.run(new Date().toISOString(), tenantId).changes,
-      );
+    rejectAllPending(): number {
+      return Number(rejectPending.run(new Date().toISOString()).changes);
     },
 
-    mountable(
-      tenantId: TenantId,
-      kinds: readonly SkillKind[],
-    ): readonly SkillCandidate[] {
+    mountable(kinds: readonly SkillKind[]): readonly SkillCandidate[] {
       if (kinds.length === 0) return [];
       const rows = db
         .prepare(
           `SELECT * FROM skills
-            WHERE tenant_id = ? AND status = 'approved'
+            WHERE status = 'approved'
               AND kind IN (${placeholders(kinds.length)})
             ORDER BY proposed_at ASC`,
         )
-        .all(tenantId, ...kinds) as unknown as SkillRow[];
+        .all(...kinds) as unknown as SkillRow[];
       return rows.map(toCandidate);
     },
   };

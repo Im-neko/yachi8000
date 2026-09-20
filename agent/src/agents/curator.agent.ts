@@ -2,7 +2,6 @@
 
 import { type AgentProps, useModel, useTool } from '@flue/runtime';
 import { env } from '../config/env.ts';
-import { tenantIdOfSkillCurator } from '../domain/tenant.ts';
 import { LLM_PROVIDER_ID } from '../infrastructure/llm/provider-id.ts';
 import { createSkillCuratorTools } from '../tools/skill.tools.ts';
 
@@ -49,14 +48,14 @@ const INSTRUCTIONS = `
  * fire-and-forget で dispatch されるので、**会話履歴・応答レイテンシに
  * 影響しない**（→ C-07 の構造をそのまま採用）。
  *
- * テナントは `id` から復元する（`skill-curator-<tenantId>`）。
+ * **インスタンスは会話ごとに立つが、書き込む先のスキルストアは全体で
+ * ひとつ**（→ D-35）。材料が 1 会話の 1 ターンだから会話ごとに分けている
+ * だけで、出てきた候補はどこからでも承認できる。
  */
-export function SkillCurator({ id }: AgentProps) {
-  const tenantId = tenantIdOfSkillCurator(id);
-
+export function SkillCurator(_props: AgentProps) {
   useModel(MODEL, { compaction: { model: MODEL } });
 
-  for (const tool of createSkillCuratorTools({ tenantId })) {
+  for (const tool of createSkillCuratorTools()) {
     useTool(tool);
   }
 

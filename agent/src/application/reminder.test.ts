@@ -9,7 +9,7 @@ import {
   nextOccurrence,
   type Reminder,
 } from '../domain/reminder.ts';
-import type { TenantId } from '../domain/tenant.ts';
+import type { SpeakerId } from '../domain/speaker.ts';
 import {
   cancelReminder,
   fireDueReminders,
@@ -19,7 +19,7 @@ import {
   scheduleReminder,
 } from './reminder.ts';
 
-const TENANT = 'discord-guild-1' as TenantId;
+const SPEAKER = 'discord-user-1' as SpeakerId;
 const NOW = new Date('2026-09-12T00:00:00.000Z'); // 09:00 JST
 
 /**
@@ -39,7 +39,6 @@ function createFakeReminderStore(): ReminderStore {
     schedule(input: ScheduleReminderInput): Reminder {
       const reminder: Reminder = {
         id: `r${++nextId}`,
-        tenantId: input.tenantId,
         title: input.title,
         description: input.description,
         dueAt: input.dueAt,
@@ -54,22 +53,30 @@ function createFakeReminderStore(): ReminderStore {
       return reminder;
     },
 
-    listPending(tenantId) {
+    listPending(createdBy) {
       return rows
-        .filter((row) => row.tenantId === tenantId && row.firedAt === undefined)
+        .filter(
+          (row) => row.createdBy === createdBy && row.firedAt === undefined,
+        )
         .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
     },
 
-    cancel(tenantId, id) {
+    cancel(createdBy, id) {
       const index = rows.findIndex(
         (row) =>
-          row.tenantId === tenantId &&
+          row.createdBy === createdBy &&
           row.id === id &&
           row.firedAt === undefined,
       );
       if (index < 0) return false;
       rows.splice(index, 1);
       return true;
+    },
+
+    countPending(createdBy) {
+      return rows.filter(
+        (row) => row.createdBy === createdBy && row.firedAt === undefined,
+      ).length;
     },
 
     claimDue(now) {
@@ -171,13 +178,12 @@ function schedule(
   overrides: { guildId?: string | undefined; channelId?: string } = {},
 ) {
   return scheduleReminder(harness.deps, {
-    tenantId: TENANT,
+    createdBy: SPEAKER,
     title: 'ゴミを出す',
     description: undefined,
     dueAtJst,
     channelId: overrides.channelId ?? 'c1',
     guildId: 'guildId' in overrides ? overrides.guildId : 'g1',
-    createdBy: 'u1',
     now: NOW,
   });
 }
@@ -192,7 +198,7 @@ describe('scheduleReminder', () => {
   it('未来の日時なら登録できる', () => {
     const reminder = schedule(harness, '2026-09-12T10:00');
     expect(reminder.dueAt).toBe('2026-09-12T01:00:00.000Z');
-    expect(listReminders(harness.deps, TENANT)).toHaveLength(1);
+    expect(listReminders(harness.deps, SPEAKER)).toHaveLength(1);
   });
 
   // 「登録できたのに鳴らない」が最も分かりにくい壊れ方。poller は未来しか
@@ -205,13 +211,12 @@ describe('scheduleReminder', () => {
   it('空の内容は拒む', () => {
     expect(() =>
       scheduleReminder(harness.deps, {
-        tenantId: TENANT,
+        createdBy: SPEAKER,
         title: '   ',
         description: undefined,
         dueAtJst: '2026-09-12T10:00',
         channelId: 'c1',
         guildId: 'g1',
-        createdBy: 'u1',
         now: NOW,
       }),
     ).toThrow(/内容が空/);
@@ -224,13 +229,12 @@ describe('scheduleReminder', () => {
 
   it('空白だけの補足は落とす', () => {
     const reminder = scheduleReminder(harness.deps, {
-      tenantId: TENANT,
+      createdBy: SPEAKER,
       title: 'やること',
       description: '   ',
       dueAtJst: '2026-09-12T10:00',
       channelId: 'c1',
       guildId: 'g1',
-      createdBy: 'u1',
       now: NOW,
     });
     expect(reminder.description).toBeUndefined();
@@ -239,7 +243,7 @@ describe('scheduleReminder', () => {
 
 function scheduleWeekly(harness: Harness, weekday: 'tue' = 'tue') {
   return scheduleRecurringReminder(harness.deps, {
-    tenantId: TENANT,
+    createdBy: SPEAKER,
     title: 'ゴミを出す',
     description: undefined,
     recurrence: createRecurrence({
@@ -249,7 +253,6 @@ function scheduleWeekly(harness: Harness, weekday: 'tue' = 'tue') {
     }),
     channelId: 'c1',
     guildId: 'g1',
-    createdBy: 'u1',
     now: NOW,
   });
 }
@@ -275,13 +278,12 @@ describe('scheduleRecurringReminder', () => {
   it('空の内容は拒む', () => {
     expect(() =>
       scheduleRecurringReminder(harness.deps, {
-        tenantId: TENANT,
+        createdBy: SPEAKER,
         title: '  ',
         description: undefined,
         recurrence: createRecurrence({ kind: 'daily', time: '09:00' }),
         channelId: 'c1',
         guildId: 'g1',
-        createdBy: 'u1',
         now: NOW,
       }),
     ).toThrow(/内容が空/);
@@ -299,10 +301,10 @@ describe('cancelReminder', () => {
     const harness = createHarness({});
     const reminder = schedule(harness, '2026-09-12T10:00');
     expect(
-      cancelReminder(harness.deps, { tenantId: TENANT, id: reminder.id }),
+      cancelReminder(harness.deps, { createdBy: SPEAKER, id: reminder.id }),
     ).toBe(true);
     expect(
-      cancelReminder(harness.deps, { tenantId: TENANT, id: reminder.id }),
+      cancelReminder(harness.deps, { createdBy: SPEAKER, id: reminder.id }),
     ).toBe(false);
   });
 });
@@ -321,20 +323,19 @@ describe('fireDueReminders（繰り返し）', () => {
       { channelId: 'c1', text: 'ゴミを出す、そろそろだよ。' },
     ]);
 
-    const [pending] = listReminders(harness.deps, TENANT);
+    const [pending] = listReminders(harness.deps, SPEAKER);
     expect(pending?.dueAt).toBe('2026-09-22T00:00:00.000Z');
   });
 
   it('止まっていた間に過ぎた回は畳み、畳んだことを WARN で残す（→ D-29, INV-7）', async () => {
     const harness = createHarness({});
     scheduleRecurringReminder(harness.deps, {
-      tenantId: TENANT,
+      createdBy: SPEAKER,
       title: '朝の確認',
       description: undefined,
       recurrence: createRecurrence({ kind: 'daily', time: '09:00' }),
       channelId: 'c1',
       guildId: 'g1',
-      createdBy: 'u1',
       now: NOW,
     });
 

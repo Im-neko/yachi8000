@@ -6,14 +6,13 @@ import type {
   RecallInput,
   RememberInput,
 } from '../../domain/ports/memory-store.ts';
-import type { TenantId } from '../../domain/tenant.ts';
+import type { SpeakerId } from '../../domain/speaker.ts';
 import { logger } from '../../observability/logger.ts';
 
 const TABLE = 'long_term_memories';
 
 interface MemoryRow {
   id: string;
-  tenant_id: string;
   speaker_id: string | null;
   content: string;
   recorded_at: Date;
@@ -22,8 +21,7 @@ interface MemoryRow {
 function toRecord(row: MemoryRow): MemoryRecord {
   return {
     id: row.id,
-    tenantId: row.tenant_id as TenantId,
-    speakerId: row.speaker_id ?? undefined,
+    speakerId: (row.speaker_id ?? undefined) as SpeakerId | undefined,
     content: row.content,
     recordedAt: row.recorded_at.toISOString(),
   };
@@ -57,18 +55,40 @@ export function createPgvectorMemoryStore(
       await pool.query(`
         CREATE TABLE IF NOT EXISTS ${TABLE} (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id text NOT NULL,
           speaker_id text,
           content text NOT NULL,
           embedding vector(${embedder.dimensions}) NOT NULL,
           recorded_at timestamptz NOT NULL DEFAULT now()
         )
       `);
-      // テナント分離は WHERE tenant_id = $1 で行うので、絞り込みと並び替えを
-      // 同時に効かせられるよう tenant_id を先頭に置く（F-30）。
+      // テナント分離をやめたので、その列と索引を落とす（→ D-35）。記憶の
+      // 中身は消さない —— フェーズ 1 から積んだ行はそのまま残す。
+      await pool.query(`DROP INDEX IF EXISTS ${TABLE}_tenant_recorded_idx`);
+      await pool.query(`ALTER TABLE ${TABLE} DROP COLUMN IF EXISTS tenant_id`);
+      // **テナント時代の `speaker_id` は Discord の生のスノーフレーク。**
+      // 今は入口で正規化した `discord-user-<id>` を入れる（F-05）ので、
+      // 直さないと同じ人が 2 つの ID を持ち、話者で絞った想起が古い記憶を
+      // 取りこぼす。正規表現は接頭辞が付いた後には当たらないので冪等。
+      const migrated = await pool.query(
+        `UPDATE ${TABLE}
+            SET speaker_id = 'discord-user-' || speaker_id
+          WHERE speaker_id ~ '^[0-9]+$'`,
+      );
+      if ((migrated.rowCount ?? 0) > 0) {
+        logger.warn(
+          { table: TABLE, rows: migrated.rowCount },
+          'Namespaced legacy speaker ids on long-term memories (D-35)',
+        );
+      }
+      // 一覧は新しい順に引く。
       await pool.query(`
-        CREATE INDEX IF NOT EXISTS ${TABLE}_tenant_recorded_idx
-          ON ${TABLE} (tenant_id, recorded_at DESC)
+        CREATE INDEX IF NOT EXISTS ${TABLE}_recorded_idx
+          ON ${TABLE} (recorded_at DESC)
+      `);
+      // 「この人が言ったこと」に絞る想起のため（F-05）。既定は全体から引く。
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS ${TABLE}_speaker_recorded_idx
+          ON ${TABLE} (speaker_id, recorded_at DESC)
       `);
       await pool.query(`
         CREATE INDEX IF NOT EXISTS ${TABLE}_embedding_idx
@@ -99,15 +119,10 @@ export function createPgvectorMemoryStore(
     async remember(request: RememberInput): Promise<MemoryRecord> {
       const vector = await embedder.embedQuery(request.content);
       const { rows } = await pool.query<MemoryRow>(
-        `INSERT INTO ${TABLE} (tenant_id, speaker_id, content, embedding)
-         VALUES ($1, $2, $3, $4::vector)
-         RETURNING id, tenant_id, speaker_id, content, recorded_at`,
-        [
-          request.tenantId,
-          request.speakerId ?? null,
-          request.content,
-          toVectorLiteral(vector),
-        ],
+        `INSERT INTO ${TABLE} (speaker_id, content, embedding)
+         VALUES ($1, $2, $3::vector)
+         RETURNING id, speaker_id, content, recorded_at`,
+        [request.speakerId ?? null, request.content, toVectorLiteral(vector)],
       );
       const row = rows[0];
       if (!row) throw new Error('長期記憶の保存で行が返りませんでした。');
@@ -116,14 +131,15 @@ export function createPgvectorMemoryStore(
 
     async recall(request: RecallInput): Promise<MemorySearchHit[]> {
       const vector = await embedder.embedQuery(request.query);
+      // 話者で絞るのは呼び出し側が明示したときだけ（→ D-35, F-05）。
       const { rows } = await pool.query<MemoryRow & { score: number }>(
-        `SELECT id, tenant_id, speaker_id, content, recorded_at,
-                1 - (embedding <=> $2::vector) AS score
+        `SELECT id, speaker_id, content, recorded_at,
+                1 - (embedding <=> $1::vector) AS score
            FROM ${TABLE}
-          WHERE tenant_id = $1
-          ORDER BY embedding <=> $2::vector
-          LIMIT $3`,
-        [request.tenantId, toVectorLiteral(vector), request.limit],
+          WHERE $3::text IS NULL OR speaker_id = $3
+          ORDER BY embedding <=> $1::vector
+          LIMIT $2`,
+        [toVectorLiteral(vector), request.limit, request.speakerId ?? null],
       );
       return rows.map((row) => ({
         ...toRecord(row),
@@ -131,23 +147,21 @@ export function createPgvectorMemoryStore(
       }));
     },
 
-    async list(tenantId: TenantId, limit: number): Promise<MemoryRecord[]> {
+    async list(limit: number): Promise<MemoryRecord[]> {
       const { rows } = await pool.query<MemoryRow>(
-        `SELECT id, tenant_id, speaker_id, content, recorded_at
+        `SELECT id, speaker_id, content, recorded_at
            FROM ${TABLE}
-          WHERE tenant_id = $1
           ORDER BY recorded_at DESC
-          LIMIT $2`,
-        [tenantId, limit],
+          LIMIT $1`,
+        [limit],
       );
       return rows.map(toRecord);
     },
 
-    async forget(tenantId: TenantId, id: string): Promise<boolean> {
-      const result = await pool.query(
-        `DELETE FROM ${TABLE} WHERE tenant_id = $1 AND id = $2`,
-        [tenantId, id],
-      );
+    async forget(id: string): Promise<boolean> {
+      const result = await pool.query(`DELETE FROM ${TABLE} WHERE id = $1`, [
+        id,
+      ]);
       return (result.rowCount ?? 0) > 0;
     },
 

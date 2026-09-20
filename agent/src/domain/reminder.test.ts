@@ -8,19 +8,18 @@ import {
   parseJstDueAt,
   type Reminder,
 } from './reminder.ts';
-import type { TenantId } from './tenant.ts';
+import type { SpeakerId } from './speaker.ts';
 
 function reminder(overrides: Partial<Reminder> = {}): Reminder {
   return {
     id: 'r1',
-    tenantId: 'discord-guild-1' as TenantId,
     title: 'ゴミを出す',
     description: undefined,
     dueAt: '2026-09-12T01:00:00.000Z',
     recurrence: undefined,
     channelId: 'c1',
     guildId: 'g1',
-    createdBy: 'u1',
+    createdBy: 'discord-user-1' as SpeakerId,
     createdAt: '2026-09-12T00:00:00.000Z',
     firedAt: undefined,
     ...overrides,

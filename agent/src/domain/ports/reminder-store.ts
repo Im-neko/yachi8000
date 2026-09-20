@@ -1,8 +1,7 @@
 import type { Recurrence, Reminder } from '../reminder.ts';
-import type { TenantId } from '../tenant.ts';
+import type { SpeakerId } from '../speaker.ts';
 
 export interface ScheduleReminderInput {
-  tenantId: TenantId;
   title: string;
   description: string | undefined;
   /** 最初に鳴る時刻。ISO 8601（UTC）。 */
@@ -11,7 +10,7 @@ export interface ScheduleReminderInput {
   recurrence: Recurrence | undefined;
   channelId: string;
   guildId: string | undefined;
-  createdBy: string | undefined;
+  createdBy: SpeakerId | undefined;
 }
 
 /**
@@ -26,10 +25,12 @@ export interface ScheduleReminderInput {
  */
 export interface ReminderStore {
   schedule(input: ScheduleReminderInput): Reminder;
-  /** 未発火のものを期限の昇順で返す。 */
-  listPending(tenantId: TenantId): readonly Reminder[];
-  /** 消せたら true、そのテナントに無い / 既に発火済みなら false。 */
-  cancel(tenantId: TenantId, id: string): boolean;
+  /** その人が登録した未発火のものを、期限の昇順で返す（→ D-35）。 */
+  listPending(createdBy: SpeakerId): readonly Reminder[];
+  /** 未発火で、かつ**その人が登録したもの**だけを消す。消せたら true。 */
+  cancel(createdBy: SpeakerId, id: string): boolean;
+  /** その人の未発火の件数。登録の上限を判定するために引く（F-31）。 */
+  countPending(createdBy: SpeakerId): number;
   /**
    * 期限が来た未発火のものを**先に進めてから**返す。
    *

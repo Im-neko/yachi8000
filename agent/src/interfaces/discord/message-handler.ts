@@ -7,8 +7,8 @@ import { currentVoiceChannel } from '../../application/voice-session.ts';
 import { formatJstDate } from '../../domain/issue.ts';
 import { shouldRespond } from '../../domain/response-policy.ts';
 import { logger } from '../../observability/logger.ts';
+import { conversationIdOf, speakerIdOf } from './conversation.ts';
 import { splitForDiscord } from './outgoing.ts';
-import { tenantIdOf } from './tenant.ts';
 
 export interface MessageHandlerDependencies {
   speech: SpeechService;
@@ -81,13 +81,14 @@ async function handleMessage(
   });
   if (!respond) return;
 
-  const tenantId = tenantIdOf(message);
+  const conversationId = conversationIdOf(message);
   const delivered: DeliveredMessageInput = {
     kind: 'signal',
     type: 'discord.message',
     body: text,
     attributes: {
-      speakerId: message.author.id,
+      // 正規化してから渡す（F-05）。生のスノーフレークを上の層へ漏らさない。
+      speakerId: speakerIdOf(message),
       speakerName: message.author.displayName,
       channelId: message.channelId,
       // リマインダーの発火先を決めるのに使う（F-31）。DM には載らない。
@@ -100,7 +101,7 @@ async function handleMessage(
   const channel = message.channel;
   if (!channel.isSendable()) {
     logger.warn(
-      { tenantId, channelType: channel.type },
+      { conversationId, channelType: channel.type },
       'Cannot reply — the bot lacks send permission on this channel',
     );
     return;
@@ -108,9 +109,12 @@ async function handleMessage(
 
   await channel.sendTyping();
 
-  const reply = await runAgentTurn({ tenantId, message: delivered });
+  const reply = await runAgentTurn({ conversationId, message: delivered });
   if (!reply) {
-    logger.warn({ tenantId, messageId: message.id }, 'Agent returned no text');
+    logger.warn(
+      { conversationId, messageId: message.id },
+      'Agent returned no text',
+    );
     return;
   }
 

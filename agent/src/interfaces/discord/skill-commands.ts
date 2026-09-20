@@ -14,7 +14,7 @@ import {
   type SkillDependencies,
 } from '../../application/skill.ts';
 import type { SkillCandidate, SkillStatus } from '../../domain/skill.ts';
-import { tenantIdOfInteraction } from './tenant.ts';
+import { isInGuild } from './guild-only.ts';
 
 /** Discord のオートコンプリートが返せる候補数の上限。 */
 const AUTOCOMPLETE_LIMIT = 25;
@@ -116,8 +116,7 @@ export async function handleSkillCommand(
   interaction: ChatInputCommandInteraction,
   deps: SkillDependencies,
 ): Promise<void> {
-  const tenantId = tenantIdOfInteraction(interaction);
-  if (!tenantId) {
+  if (!isInGuild(interaction)) {
     await interaction.reply({
       content: 'このコマンドはサーバ内で実行してください。',
       flags: MessageFlags.Ephemeral,
@@ -131,7 +130,7 @@ export async function handleSkillCommand(
     const requested = interaction.options.getString('status') ?? 'pending';
     const statuses =
       requested === 'all' ? ALL_STATUSES : [requested as SkillStatus];
-    const skills = listSkills(deps, tenantId, statuses);
+    const skills = listSkills(deps, statuses);
     await interaction.reply({
       content:
         skills.length === 0
@@ -143,7 +142,7 @@ export async function handleSkillCommand(
   }
 
   if (subcommand === 'reject-all') {
-    const rejected = rejectAllPendingSkills(deps, tenantId);
+    const rejected = rejectAllPendingSkills(deps);
     await interaction.reply({
       content: `保留中のスキルを ${rejected} 件却下しました。`,
       flags: MessageFlags.Ephemeral,
@@ -168,7 +167,7 @@ export async function handleSkillCommand(
     return;
   }
 
-  const result = action(deps, { tenantId, id });
+  const result = action(deps, id);
   if (!result) {
     await interaction.reply({
       content:
@@ -194,8 +193,7 @@ export async function handleSkillAutocomplete(
   interaction: AutocompleteInteraction,
   deps: SkillDependencies,
 ): Promise<void> {
-  const tenantId = tenantIdOfInteraction(interaction);
-  if (!tenantId) {
+  if (!isInGuild(interaction)) {
     await interaction.respond([]);
     return;
   }
@@ -203,7 +201,7 @@ export async function handleSkillAutocomplete(
   const statuses =
     AUTOCOMPLETE_STATUSES[interaction.options.getSubcommand()] ?? ALL_STATUSES;
   const typed = interaction.options.getFocused().toLowerCase();
-  const choices = listSkills(deps, tenantId, statuses)
+  const choices = listSkills(deps, statuses)
     .filter((skill) => skill.name.toLowerCase().includes(typed))
     .slice(0, AUTOCOMPLETE_LIMIT)
     .map((skill) => ({

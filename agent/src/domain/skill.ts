@@ -1,5 +1,3 @@
-import type { TenantId } from './tenant.ts';
-
 /**
  * スキル候補の種別（→ Q-16 の決定）。
  *
@@ -27,8 +25,7 @@ export type SkillStatus = 'pending' | 'approved' | 'rejected' | 'disabled';
 
 export interface SkillCandidate {
   id: string;
-  tenantId: TenantId;
-  /** Flue のスキル名。テナント内で一意。 */
+  /** Flue のスキル名。全体で一意（→ D-35）。 */
   name: string;
   /** カタログ行。モデルが「いつ使うか」を決める手掛かり。 */
   description: string;
@@ -45,8 +42,8 @@ export interface SkillCandidate {
  * Flue の `defineSkill()` が課す制約（`@flue/runtime` 2.0.3 の実装を確認）。
  *
  * **候補生成の時点で落とす。** 承認まで通してから `defineSkill()` に投げられる
- * と、承認操作が失敗するか、最悪 render で毎ターン落ちる（そのテナントの
- * エージェントが会話できなくなる）。
+ * と、承認操作が失敗するか、最悪 render で毎ターン落ちる（エージェントが
+ * 会話できなくなる）。
  */
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_NAME_LENGTH = 64;

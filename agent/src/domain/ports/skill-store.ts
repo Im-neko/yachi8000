@@ -4,11 +4,7 @@ import type {
   SkillProposal,
   SkillStatus,
 } from '../skill.ts';
-import type { TenantId } from '../tenant.ts';
-
-export interface ProposeSkillInput extends SkillProposal {
-  tenantId: TenantId;
-}
+export type ProposeSkillInput = SkillProposal;
 
 /**
  * スキル候補の保存先（F-40〜F-43）。
@@ -19,31 +15,27 @@ export interface ProposeSkillInput extends SkillProposal {
  * 後から来た提案が承認済みの行を pending に戻すことはない。
  *
  * エージェントの render から同期で読むので port も同期。
+ *
+ * **テナントでは分けない**（→ D-35）。入れ物は全体でひとつで、どの会話から
+ * 提案されたスキルも同じ一覧に並び、どのサーバの管理者からも承認できる。
  */
 export interface SkillStore {
   /** 同名が既にあれば投げる。却下済みの名前も残っているので衝突する。 */
   propose(input: ProposeSkillInput): SkillCandidate;
-  list(
-    tenantId: TenantId,
-    statuses: readonly SkillStatus[],
-  ): readonly SkillCandidate[];
-  get(tenantId: TenantId, id: string): SkillCandidate | undefined;
+  list(statuses: readonly SkillStatus[]): readonly SkillCandidate[];
+  get(id: string): SkillCandidate | undefined;
   /**
    * 状態を遷移させる。`from` のいずれかに合致する行だけを動かす。
    *
    * @returns 遷移後の候補。合致する行が無ければ undefined。
    */
   transition(
-    tenantId: TenantId,
     id: string,
     from: readonly SkillStatus[],
     to: SkillStatus,
   ): SkillCandidate | undefined;
   /** pending を一括で却下し、却下した件数を返す（F-43）。 */
-  rejectAllPending(tenantId: TenantId): number;
+  rejectAllPending(): number;
   /** approved かつ指定の種別のものを、提案順に返す。応答へマウントする対象。 */
-  mountable(
-    tenantId: TenantId,
-    kinds: readonly SkillKind[],
-  ): readonly SkillCandidate[];
+  mountable(kinds: readonly SkillKind[]): readonly SkillCandidate[];
 }

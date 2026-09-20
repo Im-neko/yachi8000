@@ -1,10 +1,13 @@
 import { init } from '@flue/runtime';
-import { skillCuratorInstanceId, type TenantId } from '../domain/tenant.ts';
+import {
+  type ConversationId,
+  skillCuratorInstanceId,
+} from '../domain/conversation.ts';
 import { logger } from '../observability/logger.ts';
 import { SkillCurator } from './curator.agent.ts';
 
 export interface CuratorTurnInput {
-  tenantId: TenantId;
+  conversationId: ConversationId;
   /** 利用者の発言。 */
   userText: string;
   /** アシスタントの返信。 */
@@ -38,7 +41,7 @@ function composeCuratorMessage(input: CuratorTurnInput): string {
  * この関数は**投げない**。呼び出し側は戻り値を無視してよい。
  */
 export function dispatchSkillCurator(input: CuratorTurnInput): void {
-  const instanceId = skillCuratorInstanceId(input.tenantId);
+  const instanceId = skillCuratorInstanceId(input.conversationId);
   try {
     init(SkillCurator, { id: instanceId })
       .dispatch({

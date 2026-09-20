@@ -5,11 +5,6 @@ import {
   recordPersonaChange,
 } from '../application/persona.ts';
 import { personaDependencies } from '../composition-root.ts';
-import type { TenantId } from '../domain/tenant.ts';
-
-export interface PersonaToolsContext {
-  tenantId: TenantId;
-}
 
 /**
  * 会話を通じた人格の変化の記録（F-33）。
@@ -19,8 +14,11 @@ export interface PersonaToolsContext {
  *
  * 固定モード中も記録は続ける（D-13）。効いていないことはツールの戻り値で
  * 伝える —— 黙って記録だけすると、利用者は「言ったのに変わらない」だけを見る。
+ *
+ * **人格はひとつ**（→ D-35）。ここへ入った変化は、どの会話でも・誰に対しても
+ * 効く。個人ごとの接し方は人格ではなくプロフィール（F-05）に置く。
  */
-export function createPersonaTools(ctx: PersonaToolsContext) {
+export function createPersonaTools() {
   const record = defineTool({
     name: 'record_persona_change',
     description:
@@ -35,7 +33,6 @@ export function createPersonaTools(ctx: PersonaToolsContext) {
     }),
     run({ data }) {
       const diff = recordPersonaChange(personaDependencies, {
-        tenantId: ctx.tenantId,
         instruction: data.instruction,
         reason: data.reason,
       });

@@ -1,26 +1,33 @@
 import type { MemoryRecord, MemorySearchHit } from '../memory.ts';
-import type { TenantId } from '../tenant.ts';
+import type { SpeakerId } from '../speaker.ts';
 
 export interface RememberInput {
-  tenantId: TenantId;
   content: string;
-  speakerId?: string | undefined;
+  speakerId?: SpeakerId | undefined;
 }
 
 export interface RecallInput {
-  tenantId: TenantId;
   query: string;
   limit: number;
+  /**
+   * この人が言ったものだけに絞る。既定（undefined）は全体から引く。
+   *
+   * **絞るのは呼び出し側が明示したときだけ**（→ D-35, F-05）。記憶はひとつの
+   * 空間で、話者は分離の鍵ではなく属性。
+   */
+  speakerId?: SpeakerId | undefined;
 }
 
 /**
- * 長期記憶の保存先（F-30）。テナント分離は実装側が必ず `tenant_id` の
- * 絞り込みとして行う —— 呼び出し側にフィルタを任せない。
+ * 長期記憶の保存先（F-30）。
+ *
+ * **テナントでは分けない**（→ D-35）。入れ物は全体でひとつで、「誰の話か」は
+ * `speakerId` を列として持つだけ。
  */
 export interface MemoryStore {
   remember(input: RememberInput): Promise<MemoryRecord>;
   recall(input: RecallInput): Promise<MemorySearchHit[]>;
-  list(tenantId: TenantId, limit: number): Promise<MemoryRecord[]>;
-  /** 消せたら true、そのテナントに無ければ false。 */
-  forget(tenantId: TenantId, id: string): Promise<boolean>;
+  list(limit: number): Promise<MemoryRecord[]>;
+  /** 消せたら true、無ければ false。 */
+  forget(id: string): Promise<boolean>;
 }

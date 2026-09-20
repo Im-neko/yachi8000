@@ -101,7 +101,7 @@ curl -X POST http://localhost:5173/api/v1/notify \
 ```bash
 curl -X POST http://localhost:5173/debug/chat \
   -H 'Content-Type: application/json' \
-  -d '{"tenantId":"debug","text":"はじめまして"}'
+  -d '{"conversationId":"debug","text":"はじめまして"}'
 ```
 
 | コマンド（`agent/` 配下） | 内容 |

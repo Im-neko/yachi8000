@@ -1,6 +1,6 @@
 import type { MemoryRecord, MemorySearchHit } from '../domain/memory.ts';
 import type { MemoryStore } from '../domain/ports/memory-store.ts';
-import type { TenantId } from '../domain/tenant.ts';
+import type { SpeakerId } from '../domain/speaker.ts';
 
 export interface MemoryDependencies {
   store: MemoryStore;
@@ -19,44 +19,46 @@ const LIST_LIMIT = 50;
  */
 export async function rememberFact(
   deps: MemoryDependencies,
-  input: { tenantId: TenantId; content: string; speakerId?: string },
+  input: { content: string; speakerId?: SpeakerId },
 ): Promise<MemoryRecord> {
   const content = input.content.trim();
   if (content === '') {
     throw new Error('長期記憶に空の内容は保存できません。');
   }
-  return deps.store.remember({
-    tenantId: input.tenantId,
-    content,
-    speakerId: input.speakerId,
-  });
+  return deps.store.remember({ content, speakerId: input.speakerId });
 }
 
+/**
+ * 長期記憶を想起する（F-30）。
+ *
+ * **既定は全体から引く**（→ D-35, F-05）。`speakerId` を渡したときだけ
+ * 「その人が言ったこと」に絞る —— 誰が言ったかで常に閉じると、人から
+ * 聞いた話を別の人に答えられなくなる。
+ */
 export async function recallMemories(
   deps: MemoryDependencies,
-  input: { tenantId: TenantId; query: string },
+  input: { query: string; speakerId?: SpeakerId },
 ): Promise<MemorySearchHit[]> {
   const query = input.query.trim();
   if (query === '') {
     throw new Error('長期記憶の検索に空のクエリは使えません。');
   }
   return deps.store.recall({
-    tenantId: input.tenantId,
     query,
     limit: RECALL_LIMIT,
+    speakerId: input.speakerId,
   });
 }
 
 export async function listMemories(
   deps: MemoryDependencies,
-  tenantId: TenantId,
 ): Promise<MemoryRecord[]> {
-  return deps.store.list(tenantId, LIST_LIMIT);
+  return deps.store.list(LIST_LIMIT);
 }
 
 export async function forgetMemory(
   deps: MemoryDependencies,
-  input: { tenantId: TenantId; id: string },
+  id: string,
 ): Promise<boolean> {
-  return deps.store.forget(input.tenantId, input.id);
+  return deps.store.forget(id);
 }

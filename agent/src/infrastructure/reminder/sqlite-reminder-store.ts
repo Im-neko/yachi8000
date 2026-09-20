@@ -9,11 +9,10 @@ import {
   type Recurrence,
   type Reminder,
 } from '../../domain/reminder.ts';
-import type { TenantId } from '../../domain/tenant.ts';
+import type { SpeakerId } from '../../domain/speaker.ts';
 
 interface ReminderRow {
   id: string;
-  tenant_id: string;
   title: string;
   description: string | null;
   due_at: string;
@@ -46,7 +45,7 @@ function decodeRecurrence(value: string | null): Recurrence | undefined {
   if (rule.kind === 'weekly') {
     // 形まで見ておく。kind だけ確かめて通すと、曜日の無い行が
     // `nextOccurrence` の中で TypeError になり、**その tick 全体**
-    // （他テナント・1 回限りを含む）が毎回落ちる。
+    // （他の人の分・1 回限りを含む）が毎回落ちる。
     if (!Array.isArray(rule.weekdays) || rule.weekdays.length === 0) {
       throw new Error(`繰り返しの規則に曜日がありません: ${value}`);
     }
@@ -58,14 +57,13 @@ function decodeRecurrence(value: string | null): Recurrence | undefined {
 function toReminder(row: ReminderRow): Reminder {
   return {
     id: row.id,
-    tenantId: row.tenant_id as TenantId,
     title: row.title,
     description: row.description ?? undefined,
     dueAt: row.due_at,
     recurrence: decodeRecurrence(row.recurrence),
     channelId: row.channel_id,
     guildId: row.guild_id ?? undefined,
-    createdBy: row.created_by ?? undefined,
+    createdBy: (row.created_by ?? undefined) as SpeakerId | undefined,
     createdAt: row.created_at,
     firedAt: row.fired_at ?? undefined,
   };
@@ -74,23 +72,31 @@ function toReminder(row: ReminderRow): Reminder {
 /**
  * リマインダーの SQLite 実装（F-31）。
  *
- * テナント分離は**この実装が必ず `tenant_id` の絞り込みとして行う**。
- * 呼び出し側にフィルタを任せない（長期記憶と同じ方針）。
+ * **入れ物は全体でひとつ**（→ D-35）。ただし一覧・取り消し・件数は
+ * **この実装が必ず `created_by` の絞り込みとして行う**。呼び出し側に
+ * フィルタを任せない —— 任せると、絞り忘れが他人の予定を消す形で出る。
+ *
+ * **発火（`claimDue`）だけは絞らない。** 届け先は登録したチャンネルで、
+ * 誰が登録したかとは関係がない。
  */
 export function createSqliteReminderStore(db: DatabaseSync): ReminderStore {
   const insert = db.prepare(
     `INSERT INTO reminders
-       (id, tenant_id, title, description, due_at, recurrence, channel_id, guild_id, created_by, created_at, fired_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+       (id, title, description, due_at, recurrence, channel_id, guild_id, created_by, created_at, fired_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
   );
   const selectPending = db.prepare(
     `SELECT * FROM reminders
-      WHERE tenant_id = ? AND fired_at IS NULL
+      WHERE created_by = ? AND fired_at IS NULL
       ORDER BY due_at ASC`,
+  );
+  const countPendingOf = db.prepare(
+    `SELECT COUNT(*) AS count FROM reminders
+      WHERE created_by = ? AND fired_at IS NULL`,
   );
   const deletePending = db.prepare(
     `DELETE FROM reminders
-      WHERE tenant_id = ? AND id = ? AND fired_at IS NULL`,
+      WHERE created_by = ? AND id = ? AND fired_at IS NULL`,
   );
   const selectDue = db.prepare(
     `SELECT * FROM reminders
@@ -114,7 +120,6 @@ export function createSqliteReminderStore(db: DatabaseSync): ReminderStore {
     schedule(input: ScheduleReminderInput): Reminder {
       const reminder: Reminder = {
         id: randomUUID(),
-        tenantId: input.tenantId,
         title: input.title,
         description: input.description,
         dueAt: input.dueAt,
@@ -127,7 +132,6 @@ export function createSqliteReminderStore(db: DatabaseSync): ReminderStore {
       };
       insert.run(
         reminder.id,
-        reminder.tenantId,
         reminder.title,
         reminder.description ?? null,
         reminder.dueAt,
@@ -142,14 +146,19 @@ export function createSqliteReminderStore(db: DatabaseSync): ReminderStore {
       return reminder;
     },
 
-    listPending(tenantId: TenantId): readonly Reminder[] {
-      return (selectPending.all(tenantId) as unknown as ReminderRow[]).map(
+    listPending(createdBy: SpeakerId): readonly Reminder[] {
+      return (selectPending.all(createdBy) as unknown as ReminderRow[]).map(
         toReminder,
       );
     },
 
-    cancel(tenantId: TenantId, id: string): boolean {
-      return deletePending.run(tenantId, id).changes > 0;
+    cancel(createdBy: SpeakerId, id: string): boolean {
+      return deletePending.run(createdBy, id).changes > 0;
+    },
+
+    countPending(createdBy: SpeakerId): number {
+      const row = countPendingOf.get(createdBy) as unknown as { count: number };
+      return Number(row.count);
     },
 
     claimDue(now: string): readonly Reminder[] {

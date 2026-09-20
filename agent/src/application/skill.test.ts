@@ -5,7 +5,6 @@ import type {
 } from '../domain/ports/skill-store.ts';
 import type { Settings } from '../domain/settings.ts';
 import type { SkillCandidate, SkillStatus } from '../domain/skill.ts';
-import type { TenantId } from '../domain/tenant.ts';
 import {
   approveSkill,
   disableSkill,
@@ -15,8 +14,6 @@ import {
   rejectSkill,
   type SkillDependencies,
 } from './skill.ts';
-
-const TENANT = 'discord-guild-1' as TenantId;
 
 /**
  * SkillStore の代役。
@@ -29,22 +26,17 @@ function createFakeSkillStore(): SkillStore {
   const rows: SkillCandidate[] = [];
   let nextId = 0;
 
-  function get(tenantId: TenantId, id: string): SkillCandidate | undefined {
-    return rows.find((row) => row.tenantId === tenantId && row.id === id);
+  function get(id: string): SkillCandidate | undefined {
+    return rows.find((row) => row.id === id);
   }
 
   return {
     propose(input: ProposeSkillInput): SkillCandidate {
-      if (
-        rows.some(
-          (row) => row.tenantId === input.tenantId && row.name === input.name,
-        )
-      ) {
+      if (rows.some((row) => row.name === input.name)) {
         throw new Error(`スキル名 "${input.name}" は既に使われています。`);
       }
       const candidate: SkillCandidate = {
         id: `s${++nextId}`,
-        tenantId: input.tenantId,
         name: input.name,
         description: input.description,
         instructions: input.instructions,
@@ -57,20 +49,15 @@ function createFakeSkillStore(): SkillStore {
       return candidate;
     },
 
-    list(tenantId, statuses) {
-      return rows.filter(
-        (row) => row.tenantId === tenantId && statuses.includes(row.status),
-      );
+    list(statuses) {
+      return rows.filter((row) => statuses.includes(row.status));
     },
 
     get,
 
-    transition(tenantId, id, from, to) {
+    transition(id, from, to) {
       const index = rows.findIndex(
-        (row) =>
-          row.tenantId === tenantId &&
-          row.id === id &&
-          from.includes(row.status),
+        (row) => row.id === id && from.includes(row.status),
       );
       if (index < 0) return undefined;
       const current = rows[index];
@@ -84,10 +71,10 @@ function createFakeSkillStore(): SkillStore {
       return moved;
     },
 
-    rejectAllPending(tenantId) {
+    rejectAllPending() {
       let rejected = 0;
       for (const [index, row] of rows.entries()) {
-        if (row.tenantId !== tenantId || row.status !== 'pending') continue;
+        if (row.status !== 'pending') continue;
         rows[index] = {
           ...row,
           status: 'rejected' satisfies SkillStatus,
@@ -98,12 +85,9 @@ function createFakeSkillStore(): SkillStore {
       return rejected;
     },
 
-    mountable(tenantId, kinds) {
+    mountable(kinds) {
       return rows.filter(
-        (row) =>
-          row.tenantId === tenantId &&
-          row.status === 'approved' &&
-          kinds.includes(row.kind),
+        (row) => row.status === 'approved' && kinds.includes(row.kind),
       );
     },
   };
@@ -125,7 +109,6 @@ function propose(
   kind: 'knowledge' | 'persona' = 'knowledge',
 ) {
   return proposeSkill(deps, {
-    tenantId: TENANT,
     name,
     description: `${name} を使う場面`,
     instructions: `${name} の中身`,
@@ -142,14 +125,14 @@ describe('proposeSkill', () => {
 
   it('pending として記録する（承認まで応答に出ない）', () => {
     expect(propose(deps, 'ok-skill').status).toBe('pending');
-    expect(mountableSkills(deps, TENANT)).toHaveLength(0);
+    expect(mountableSkills(deps)).toHaveLength(0);
   });
 
   // 承認まで通してから defineSkill に蹴られると、承認操作か毎ターンの
   // render が壊れる。入口で落とす。
   it('Flue のスキルとして成立しない候補は保存しない', () => {
     expect(() => propose(deps, 'Bad_Name')).toThrow();
-    expect(mountableSkills(deps, TENANT)).toHaveLength(0);
+    expect(mountableSkills(deps)).toHaveLength(0);
   });
 });
 
@@ -162,53 +145,39 @@ describe('承認フロー（F-41, F-43）', () => {
 
   it('承認するとマウント対象になる', () => {
     const candidate = propose(deps, 'to-approve');
-    expect(
-      approveSkill(deps, { tenantId: TENANT, id: candidate.id })?.status,
-    ).toBe('approved');
-    expect(mountableSkills(deps, TENANT).map((s) => s.name)).toEqual([
-      'to-approve',
-    ]);
+    expect(approveSkill(deps, candidate.id)?.status).toBe('approved');
+    expect(mountableSkills(deps).map((s) => s.name)).toEqual(['to-approve']);
   });
 
   it('却下したものは承認できない', () => {
     const candidate = propose(deps, 'to-reject');
-    rejectSkill(deps, { tenantId: TENANT, id: candidate.id });
-    expect(
-      approveSkill(deps, { tenantId: TENANT, id: candidate.id }),
-    ).toBeUndefined();
+    rejectSkill(deps, candidate.id);
+    expect(approveSkill(deps, candidate.id)).toBeUndefined();
   });
 
   it('承認済みを却下しようとしても動かない', () => {
     const candidate = propose(deps, 'already-approved');
-    approveSkill(deps, { tenantId: TENANT, id: candidate.id });
-    expect(
-      rejectSkill(deps, { tenantId: TENANT, id: candidate.id }),
-    ).toBeUndefined();
+    approveSkill(deps, candidate.id);
+    expect(rejectSkill(deps, candidate.id)).toBeUndefined();
   });
 
   it('無効化するとマウント対象から外れ、承認し直せる', () => {
     const candidate = propose(deps, 'toggled');
-    approveSkill(deps, { tenantId: TENANT, id: candidate.id });
-    expect(
-      disableSkill(deps, { tenantId: TENANT, id: candidate.id })?.status,
-    ).toBe('disabled');
-    expect(mountableSkills(deps, TENANT)).toHaveLength(0);
-    approveSkill(deps, { tenantId: TENANT, id: candidate.id });
-    expect(mountableSkills(deps, TENANT)).toHaveLength(1);
+    approveSkill(deps, candidate.id);
+    expect(disableSkill(deps, candidate.id)?.status).toBe('disabled');
+    expect(mountableSkills(deps)).toHaveLength(0);
+    approveSkill(deps, candidate.id);
+    expect(mountableSkills(deps)).toHaveLength(1);
   });
 
   it('一括却下は pending だけを動かす', () => {
     const pending = propose(deps, 'pending-one');
     const approved = propose(deps, 'approved-one');
-    approveSkill(deps, { tenantId: TENANT, id: approved.id });
+    approveSkill(deps, approved.id);
 
-    expect(rejectAllPendingSkills(deps, TENANT)).toBe(1);
-    expect(mountableSkills(deps, TENANT).map((s) => s.name)).toEqual([
-      'approved-one',
-    ]);
-    expect(
-      approveSkill(deps, { tenantId: TENANT, id: pending.id }),
-    ).toBeUndefined();
+    expect(rejectAllPendingSkills(deps)).toBe(1);
+    expect(mountableSkills(deps).map((s) => s.name)).toEqual(['approved-one']);
+    expect(approveSkill(deps, pending.id)).toBeUndefined();
   });
 });
 
@@ -217,12 +186,10 @@ describe('mountableSkills と固定モード（F-34, Q-16）', () => {
     const deps = createDeps(true);
     const knowledge = propose(deps, 'a-knowledge', 'knowledge');
     const persona = propose(deps, 'a-persona', 'persona');
-    approveSkill(deps, { tenantId: TENANT, id: knowledge.id });
-    approveSkill(deps, { tenantId: TENANT, id: persona.id });
+    approveSkill(deps, knowledge.id);
+    approveSkill(deps, persona.id);
 
-    expect(mountableSkills(deps, TENANT).map((s) => s.name)).toEqual([
-      'a-knowledge',
-    ]);
+    expect(mountableSkills(deps).map((s) => s.name)).toEqual(['a-knowledge']);
   });
 
   // 固定モードは「読まない」だけ。承認そのものは止めないので、OFF に
@@ -230,8 +197,6 @@ describe('mountableSkills と固定モード（F-34, Q-16）', () => {
   it('固定モード中も人格スキルの承認は通る', () => {
     const deps = createDeps(true);
     const persona = propose(deps, 'a-persona', 'persona');
-    expect(
-      approveSkill(deps, { tenantId: TENANT, id: persona.id })?.status,
-    ).toBe('approved');
+    expect(approveSkill(deps, persona.id)?.status).toBe('approved');
   });
 });

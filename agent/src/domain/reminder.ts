@@ -1,4 +1,4 @@
-import type { TenantId } from './tenant.ts';
+import type { SpeakerId } from './speaker.ts';
 
 /**
  * 日時指定のリマインダー（F-31）。
@@ -9,7 +9,6 @@ import type { TenantId } from './tenant.ts';
  */
 export interface Reminder {
   id: string;
-  tenantId: TenantId;
   /** 利用者が書いた見出し。読み上げでもそのまま使う。 */
   title: string;
   /** 補足。無ければ undefined。 */
@@ -22,8 +21,13 @@ export interface Reminder {
   channelId: string;
   /** ギルドのリマインダーなら、そのギルド。DM なら undefined。 */
   guildId: string | undefined;
-  /** 登録した人。分からなければ undefined。 */
-  createdBy: string | undefined;
+  /**
+   * 登録した人（F-05）。分からなければ undefined。
+   *
+   * 入れ物は全体でひとつだが（→ D-35）、**一覧と取り消しはこの列で絞る** ——
+   * 他人の予定を消せる状態にはしない。
+   */
+  createdBy: SpeakerId | undefined;
   createdAt: string;
   /**
    * 発火済みなら ISO 8601。未発火なら undefined。

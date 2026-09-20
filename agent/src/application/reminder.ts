@@ -13,11 +13,11 @@ import {
   type Recurrence,
   type Reminder,
 } from '../domain/reminder.ts';
-import type { TenantId } from '../domain/tenant.ts';
+import type { SpeakerId } from '../domain/speaker.ts';
 import type { SpeechService } from './speech.ts';
 
-/** 1 テナントに溜められる未発火のリマインダー数。 */
-const MAX_PENDING_PER_TENANT = 100;
+/** 1 人が溜められる未発火のリマインダー数（→ D-35）。 */
+const MAX_PENDING_PER_SPEAKER = 100;
 
 export interface ReminderDependencies {
   store: ReminderStore;
@@ -36,7 +36,9 @@ export interface ReminderDeliveryDependencies extends ReminderDependencies {
 }
 
 export interface ScheduleReminderRequest
-  extends Omit<ScheduleReminderInput, 'dueAt' | 'recurrence'> {
+  extends Omit<ScheduleReminderInput, 'dueAt' | 'recurrence' | 'createdBy'> {
+  /** 登録する人。**上限と一覧はこの人で絞る**ので必須（→ D-35）。 */
+  createdBy: SpeakerId;
   /** JST の `YYYY-MM-DDTHH:mm`。エージェントに渡している現在時刻と同じ形式。 */
   dueAtJst: string;
   /** 過去判定の基準。呼び出し側が渡す（テストで固定できるように）。 */
@@ -44,7 +46,8 @@ export interface ScheduleReminderRequest
 }
 
 export interface ScheduleRecurringReminderRequest
-  extends Omit<ScheduleReminderInput, 'dueAt' | 'recurrence'> {
+  extends Omit<ScheduleReminderInput, 'dueAt' | 'recurrence' | 'createdBy'> {
+  createdBy: SpeakerId;
   recurrence: Recurrence;
   /** 最初の回を決める基準。呼び出し側が渡す（テストで固定できるように）。 */
   now: Date;
@@ -70,12 +73,17 @@ function normalizeDescription(
  *
  * **繰り返しのリマインダーも同じ枠で数える。** 鳴っても消えないぶん、
  * 上限に効かせておかないと際限なく溜まる。
+ *
+ * **数えるのは登録する人の分だけ**（→ D-35）。全体で数えると、1 人が
+ * 積み上げたせいで他の人が登録できなくなる。
  */
-function ensureCapacity(deps: ReminderDependencies, tenantId: TenantId): void {
-  const pending = deps.store.listPending(tenantId);
-  if (pending.length >= MAX_PENDING_PER_TENANT) {
+function ensureCapacity(
+  deps: ReminderDependencies,
+  createdBy: SpeakerId,
+): void {
+  if (deps.store.countPending(createdBy) >= MAX_PENDING_PER_SPEAKER) {
     throw new Error(
-      `未発火のリマインダーが上限（${MAX_PENDING_PER_TENANT} 件）に達しています。先に不要なものを削除してください。`,
+      `未発火のリマインダーが上限（${MAX_PENDING_PER_SPEAKER} 件）に達しています。先に不要なものを削除してください。`,
     );
   }
 }
@@ -99,10 +107,9 @@ export function scheduleReminder(
     );
   }
 
-  ensureCapacity(deps, request.tenantId);
+  ensureCapacity(deps, request.createdBy);
 
   return deps.store.schedule({
-    tenantId: request.tenantId,
     title,
     description: normalizeDescription(request.description),
     dueAt,
@@ -125,10 +132,9 @@ export function scheduleRecurringReminder(
   request: ScheduleRecurringReminderRequest,
 ): Reminder {
   const title = normalizeTitle(request.title);
-  ensureCapacity(deps, request.tenantId);
+  ensureCapacity(deps, request.createdBy);
 
   return deps.store.schedule({
-    tenantId: request.tenantId,
     title,
     description: normalizeDescription(request.description),
     dueAt: nextOccurrence(request.recurrence, request.now),
@@ -139,18 +145,20 @@ export function scheduleRecurringReminder(
   });
 }
 
+/** その人が登録した未発火のもの（→ D-35）。他人の分は見せない。 */
 export function listReminders(
   deps: ReminderDependencies,
-  tenantId: TenantId,
+  createdBy: SpeakerId,
 ): readonly Reminder[] {
-  return deps.store.listPending(tenantId);
+  return deps.store.listPending(createdBy);
 }
 
+/** その人が登録したものだけを取り消す（→ D-35）。 */
 export function cancelReminder(
   deps: ReminderDependencies,
-  input: { tenantId: TenantId; id: string },
+  input: { createdBy: SpeakerId; id: string },
 ): boolean {
-  return deps.store.cancel(input.tenantId, input.id);
+  return deps.store.cancel(input.createdBy, input.id);
 }
 
 /**
@@ -190,11 +198,7 @@ export async function fireDueReminders(
     try {
       await deps.text.send(reminder.channelId, text);
       deps.log.info(
-        {
-          reminderId: reminder.id,
-          tenantId: reminder.tenantId,
-          spoken: inSameGuild,
-        },
+        { reminderId: reminder.id, spoken: inSameGuild },
         'Fired a reminder',
       );
     } catch (error) {
@@ -204,7 +208,6 @@ export async function fireDueReminders(
         {
           err: error,
           reminderId: reminder.id,
-          tenantId: reminder.tenantId,
           channelId: reminder.channelId,
         },
         'Fired a reminder but failed to deliver it as text — it will not be retried',
@@ -231,7 +234,7 @@ async function phraseOrDegrade(
     return await deps.phraser.phrase(reminder, now);
   } catch (error) {
     deps.log.warn(
-      { err: error, reminderId: reminder.id, tenantId: reminder.tenantId },
+      { err: error, reminderId: reminder.id },
       'Failed to phrase the reminder — falling back to the deterministic template',
     );
     return composeReminderText(reminder);
@@ -260,7 +263,6 @@ function warnOnSkippedOccurrences(
   deps.log.warn(
     {
       reminderId: reminder.id,
-      tenantId: reminder.tenantId,
       recurrence: describeRecurrence(reminder.recurrence),
       dueAt: reminder.dueAt,
     },

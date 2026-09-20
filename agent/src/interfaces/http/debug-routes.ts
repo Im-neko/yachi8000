@@ -9,10 +9,11 @@ import {
   leaveVoice,
   type VoiceSessionDependencies,
 } from '../../application/voice-session.ts';
-import type { TenantId } from '../../domain/tenant.ts';
+import type { ConversationId } from '../../domain/conversation.ts';
+import { debugSpeakerId } from '../../domain/speaker.ts';
 
 const ChatRequestSchema = v.object({
-  tenantId: v.optional(v.pipe(v.string(), v.minLength(1)), 'debug-local'),
+  conversationId: v.optional(v.pipe(v.string(), v.minLength(1)), 'debug-local'),
   text: v.pipe(v.string(), v.minLength(1)),
 });
 
@@ -34,12 +35,15 @@ export function createDebugRouter(voice: VoiceSessionDependencies) {
     }
 
     const reply = await runAgentTurn({
-      tenantId: parsed.output.tenantId as TenantId,
+      conversationId: parsed.output.conversationId as ConversationId,
       message: {
         kind: 'signal',
         type: 'debug.message',
         body: parsed.output.text,
-        attributes: { speakerId: 'debug', speakerName: 'デバッグ' },
+        attributes: {
+          speakerId: debugSpeakerId(),
+          speakerName: 'デバッグ',
+        },
       },
     });
     return c.json({ reply: reply ?? null });
