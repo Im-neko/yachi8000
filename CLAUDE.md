@@ -4,7 +4,7 @@
 
 ## 開発ステータス
 
-**実装フェーズ・未リリース。フェーズ 4 まで実装済みで、自宅 Kubernetes クラスタで稼働中（2026-09-11〜）。フェーズ 3.5・4 は 2026-09-12 にデプロイ済みだが、機能そのものは実機未確認。**
+**実装フェーズ・未リリース。フェーズ 4 まで実装済みで、自宅 Kubernetes クラスタで稼働中（2026-09-11〜）。フェーズ 3.5・4 は 2026-09-12 にデプロイ済みだが、機能そのものは実機未確認。フェーズ 6（アバター）はスライス 1 だけ実装済みで、まだデプロイしていない。**
 
 | フェーズ | 内容 | 状態 |
 |---|---|---|
@@ -14,7 +14,7 @@
 | 3.5 | リマインダーと調べもの（F-31, F-35） | 実装済み・**デプロイ済み（実機未確認）** |
 | 4 | スキル自己改善（F-40〜F-43, F-33, F-34） | 実装済み・**デプロイ済み（実機未確認）** |
 | 4.5 | スレッドから Issue 起票（F-37） | 実装済み・**デプロイ済み（実機未確認）** |
-| 6 | アバター | 未着手 |
+| 6 | アバター（F-20, F-62） | **スライス 1 実装済み・未デプロイ**。映すところまで。表情の同期（F-21, F-22）と設定 UI（F-61）は未着手 |
 | 7 | 音声入力 | 未着手 |
 
 **⚠ フェーズ 3.5・4 は載ってはいるが、まだ使われていない。** 起動（`version: f6cc2bd`）とポーラーの開始は確認済みだが、**リマインダーの着信・`/skill`・`/persona`・キュレーターの発火は誰も踏んでいない。** 最初に触ったときに壊れている可能性が一番高いのはそこ。
@@ -188,6 +188,11 @@ agent/           Flue アプリ本体（TypeScript）
     check-layering.mjs 依存方向の検査（`npm run lint` から実行）
   settings.example.yaml  静的設定のひな形（複製して SETTINGS_PATH の場所へ置く）
 web/             アバター表示 + 設定 UI のフロントエンド（フェーズ 6。Vite + three.js + @pixiv/three-vrm）
+  src/
+    api.ts           agent の /api/v1/avatar/* を叩く。**既定値でごまかさない**（取れなければ落とす）
+    stage.ts         three.js の土台。VRM の読み込み・破棄・表情・カメラ
+    main.ts          canvas と状態表示の配線
+  vite.config.ts   dev は 5174。/api だけ agent（5173）へ回す
 compose.yaml     開発時の依存サービス（pgvector + 音声合成エンジン）
 docs/
   requirements/  要件定義（正典）
@@ -251,6 +256,18 @@ TypeScript は strict（`noUncheckedIndexedAccess` を含む）。コマンド�
 `npm run lint` は Biome に加えて `scripts/check-layering.mjs` を走らせる。依存方向（domain → 何も / application → domain のみ / interfaces → infrastructure 禁止）はここで機械的に落とす。目視レビューでは守られない。
 
 開発時の依存サービスはリポジトリルートの `compose.yaml`（`docker compose up -d`）。agent 本体は HMR を効かせたいので compose には入れず `npm run dev` で動かす。
+
+**`web/` は別プロジェクト**（別の `package.json` / `node_modules` / Biome 設定）。CI も別ジョブで、`agent/` の変更では走らない。
+
+```bash
+cd web
+npm run dev        # 5174。/api は agent（5173）へ proxy する
+npm run build      # dist/ を作る。本番は agent がこれを配る（WEB_DIST_PATH）
+npm run typecheck  # tsc --noEmit
+npm run lint       # Biome
+```
+
+**three.js まわりは型が通ってもバンドルで落ちることがある**ので、CI では `build` まで通す。**dev サーバで映っても本番で映るとは限らない** —— 本番は agent が静的配信する別経路。確認は `npm run build` の成果物で行う。アバターの置き方は `docs/setup/avatar.md`。
 
 ## セットアップ
 

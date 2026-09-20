@@ -19,7 +19,43 @@ behavior:
   reminderPollIntervalSeconds: 30
 `;
 
+// アバターは任意（→ F-20）。フェーズ 5 までの設定ファイルには avatar が
+// 無いので、必須にすると稼働中の Pod が上がらなくなる。
+const withAvatar = `${valid}
+avatar:
+  vrmPath: ./data/avatar.vrm
+  idleExpression: happy
+  camera:
+    targetHeight: 1.3
+    distance: 1.5
+`;
+
 describe('parseSettingsYaml', () => {
+  it('avatar が無くても読める（任意の節）', () => {
+    expect(parseSettingsYaml(valid).avatar).toBeUndefined();
+  });
+
+  it('avatar を読める', () => {
+    expect(parseSettingsYaml(withAvatar).avatar).toEqual({
+      vrmPath: './data/avatar.vrm',
+      idleExpression: 'happy',
+      camera: { targetHeight: 1.3, distance: 1.5 },
+    });
+  });
+
+  // モデル固有の blendshape 名を書かれても three-vrm 側で解決できない。
+  // 設定の時点で落とす（→ D-36 の 1）。
+  it('プリセットに無い表情は受け付けない', () => {
+    expect(() =>
+      parseSettingsYaml(
+        withAvatar.replace(
+          'idleExpression: happy',
+          'idleExpression: Fcl_ALL_Joy',
+        ),
+      ),
+    ).toThrow(/検証に失敗/);
+  });
+
   it('妥当な設定を読める', () => {
     const settings = parseSettingsYaml(valid);
     expect(settings.identity.name).toBe('やち');

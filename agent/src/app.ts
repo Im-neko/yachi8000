@@ -1,8 +1,11 @@
+import { existsSync } from 'node:fs';
 import { setProvider } from '@flue/runtime';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import type { ReminderDeliveryDependencies } from './application/reminder.ts';
 import { fireDueReminders } from './application/reminder.ts';
 import {
+  avatarDependencies,
   createVoiceRuntime,
   memoryStore,
   personaDependencies,
@@ -14,6 +17,7 @@ import { startDiscordGateway } from './infrastructure/discord/gateway.ts';
 import { createLlmProxyProvider } from './infrastructure/llm/provider.ts';
 import { registerMessageHandler } from './interfaces/discord/message-handler.ts';
 import { registerSlashCommands } from './interfaces/discord/slash-commands.ts';
+import { createAvatarRouter } from './interfaces/http/avatar-routes.ts';
 import { createDebugRouter } from './interfaces/http/debug-routes.ts';
 import { createNotifyRouter } from './interfaces/http/notify-routes.ts';
 import { logger } from './observability/logger.ts';
@@ -103,10 +107,33 @@ app.route(
   }),
 );
 
+app.route('/api/v1', createAvatarRouter(avatarDependencies));
+
 if (env.DEBUG_MODE) {
   app.route('/debug', createDebugRouter(voice.voiceSession));
   logger.warn(
     'DEBUG_MODE=true — /debug/* が有効です（認証なしで発話させられます）',
+  );
+}
+
+/**
+ * アバターのビューアと設定 UI（`web/` のビルド成果物）を配る（→ D-36 の 5）。
+ *
+ * **同一オリジンにする**ことで、設定 UI（F-61）が API を叩くときに CORS の
+ * 設計が要らなくなる。**認証は ingress 側**（→ D-37）で、ここには入れない。
+ *
+ * 成果物が無くても起動は止めない —— `web/` を作らずに agent だけ動かす
+ * 使い方（フェーズ 5 までと同じ）が成り立たなくなる。**代わりに WARN を
+ * 出す**（INV-7）。
+ */
+if (existsSync(env.WEB_DIST_PATH)) {
+  app.use('/*', serveStatic({ root: env.WEB_DIST_PATH }));
+  app.get('/*', serveStatic({ path: 'index.html', root: env.WEB_DIST_PATH }));
+  logger.info({ path: env.WEB_DIST_PATH }, 'Serving the web frontend');
+} else {
+  logger.warn(
+    { path: env.WEB_DIST_PATH },
+    'No web frontend build found — the avatar page will not be served',
   );
 }
 

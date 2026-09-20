@@ -1,0 +1,30 @@
+{
+  "name": "yachi8000-web",
+  "version": "0.1.0",
+  "description": "yachi8000 avatar viewer and settings UI (Vite / three.js / three-vrm)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19",
+    "npm": ">=11"
+  },
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@pixiv/three-vrm": "3.5.5",
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "@types/three": "0.186.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

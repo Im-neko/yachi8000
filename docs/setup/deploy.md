@@ -46,6 +46,23 @@ agent が受け取るのは接続情報だけ:
 
 **別リポジトリの作業**: `discord-vc` プラグインが `POST /api/v1/notify` に `role` を送るようになるまで、通知の役割表示（D-25）は空のまま。任意項目なので**互換は壊れないが、足すまで効かない**。
 
+### ⚠ フェーズ 6（アバター）を載せる前に
+
+**アバターの設定は任意なので、何もせずに上げても起動は止まらない。** 止まらないまま、アバターだけが出ない。
+実際に映すには 3 つ要る。置き方は `avatar.md`。
+
+1. **PVC 上に VRM を置く**（`/data/avatar.vrm`。設定ファイルと同じ場所・同じ手順）
+2. **PVC 上の `/data/settings.yaml` に `avatar` 節を手で足す**（`vrmPath` / `idleExpression` / `camera`）。
+
+   **プリセットに無い表情名を書くと設定の検証に落ちて起動しない。** 足すときは `neutral` から始める
+3. **ingress に authentik の forward auth を足す**（→ D-37）。**これが無いと、ビューアのページは誰でも開ける。**
+
+   **アプリ側には認証のコードが無い**（入れない決定をしている）ので、**守りは ingress にしか無い**。
+   agent を ingress で公開していないなら今は困らないが、公開した瞬間に開く。**公開の有無は GitOps 側を見ないと分からない**
+
+**通知 API（`/api/v1/notify`）は別**。あちらは自前の Bearer トークンを持ち続ける —— ingress の認証は
+クラスタ内から Pod へ直接来た要求には効かないため、「発話させられる入口」の守りにはならない（INV-6）。
+
 ## イメージのビルドと反映
 
 1. `main` へ push すると CI（`.github/workflows/build-and-deploy.yml`）がイメージをビルドして `:<短い SHA>` と `:latest` の 2 タグで push する
@@ -85,7 +102,7 @@ kubectl -n yachi8000 cp <手元の settings.yaml> settings-seed:/data/settings.y
 kubectl -n yachi8000 delete pod settings-seed
 ```
 
-VRM を置くのも同じ手順（フェーズ 6）。
+VRM を置くのも同じ手順（フェーズ 6）。置き場所と設定ファイルの書き方は `avatar.md`。
 
 > **PVC はバックアップ対象。** クラスタを作り直したら、設定ファイルと VRM は手で置き直す。
 

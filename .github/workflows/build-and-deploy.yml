@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "agent/**"
+      - "web/**"
+      - "Dockerfile"
       - ".github/workflows/build-and-deploy.yml"
 
 jobs:
@@ -19,9 +21,6 @@ jobs:
       # GITOPS_REPO:      <owner>/<name>
       IMAGE: ${{ secrets.IMAGE_REPOSITORY }}
       GITOPS_REPO: ${{ secrets.GITOPS_REPO }}
-    defaults:
-      run:
-        working-directory: agent
     steps:
       - uses: actions/checkout@v4
 

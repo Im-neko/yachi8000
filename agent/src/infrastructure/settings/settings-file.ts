@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
+import { AVATAR_EXPRESSIONS } from '../../domain/avatar.ts';
 import type { SettingsProvider } from '../../domain/ports/settings-provider.ts';
 import type { Settings } from '../../domain/settings.ts';
 import { logger } from '../../observability/logger.ts';
@@ -19,6 +20,18 @@ const SettingsSchema = v.object({
     personality: NonEmpty,
     speechStyle: NonEmpty,
   }),
+  // 表情はプリセット名だけを受ける（→ D-36 の 1）。モデル固有名を書かれても
+  // three-vrm 側で解決できないので、設定の時点で落とす。
+  avatar: v.optional(
+    v.object({
+      vrmPath: NonEmpty,
+      idleExpression: v.picklist(AVATAR_EXPRESSIONS),
+      camera: v.object({
+        targetHeight: v.pipe(v.number(), v.minValue(0), v.maxValue(5)),
+        distance: v.pipe(v.number(), v.minValue(0.1), v.maxValue(20)),
+      }),
+    }),
+  ),
   voice: v.object({
     speakerId: v.pipe(v.number(), v.integer(), v.minValue(0)),
     speedScale: v.pipe(v.number(), v.minValue(0.5), v.maxValue(2)),

@@ -1,4 +1,5 @@
 import type { Client } from 'discord.js';
+import type { AvatarDependencies } from './application/avatar.ts';
 import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
@@ -18,6 +19,7 @@ import type { WebSearchDependencies } from './application/web-search.ts';
 import { env } from './config/env.ts';
 import type { IssueTracker } from './domain/ports/issue-tracker.ts';
 import type { SpeechSynthesizer } from './domain/ports/speech-synthesizer.ts';
+import { createFileModelReader } from './infrastructure/avatar/file-model-reader.ts';
 import { openAppDatabase } from './infrastructure/db/app-database.ts';
 import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
@@ -117,6 +119,13 @@ export const issueDependencies: IssueDependencies = {
   tracker: createIssueTrackerFromEnv(),
   settings,
   marker: createDiscordMessageMarker({ token: env.DISCORD_BOT_TOKEN }),
+  log: logger,
+};
+
+/** アバターの表示（F-20）。VRM は設定ファイルが指す 1 ファイル（→ D-36 の 2）。 */
+export const avatarDependencies: AvatarDependencies = {
+  settings,
+  models: createFileModelReader(),
   log: logger,
 };
 

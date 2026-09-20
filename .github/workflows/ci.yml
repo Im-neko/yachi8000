@@ -1,23 +1,24 @@
-name: CI (agent)
+name: CI
 
 on:
   push:
     branches: [main]
     paths:
       - "agent/**"
+      - "web/**"
       - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "agent/**"
+      - "web/**"
       - ".github/workflows/ci.yml"
 
-defaults:
-  run:
-    working-directory: agent
-
 jobs:
-  check:
+  agent:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
     steps:
       - uses: actions/checkout@v4
 
@@ -42,3 +43,33 @@ jobs:
 
       - name: Test
         run: npm test
+
+  # アバターのビューアと設定 UI（F-20, F-61）。agent とは別のビルドで、
+  # 成果物は agent が配信する（→ D-36 の 5）。
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # ビルドまで通す。three.js まわりは型が通ってもバンドルで落ちることが
+      # あるので、成果物ができることまでを CI の条件にする。
+      - name: Build
+        run: npm run build

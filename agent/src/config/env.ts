@@ -125,6 +125,13 @@ const EnvSchema = v.object({
     v.pipe(v.string(), v.minLength(1)),
     './data/settings.yaml',
   ),
+
+  /**
+   * `web/` のビルド成果物（F-20, F-61）。**イメージに焼かれるもの**で、
+   * PVC 上の状態とは別。無ければアバターのページを配らないだけで、
+   * 起動は止めない（→ D-36 の 5）。
+   */
+  WEB_DIST_PATH: v.optional(v.pipe(v.string(), v.minLength(1)), './web'),
 });
 
 export type Env = v.InferOutput<typeof EnvSchema>;

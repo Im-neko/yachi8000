@@ -1,3 +1,4 @@
+import type { AvatarExpression } from './avatar.ts';
 import type { PersonaProfile } from './persona.ts';
 
 /**
@@ -18,6 +19,22 @@ export interface Settings {
     speakerId: number;
     speedScale: number;
     pitchScale: number;
+  };
+  /**
+   * アバターの表示（F-20, F-62）。**任意** —— 書いていなければアバターの
+   * API が「設定されていません」を返すだけで、会話は普通に動く。
+   */
+  avatar?: {
+    /** VRM ファイルのパス。設定ファイルと同じ PVC に置く（→ D-36 の 2）。 */
+    vrmPath: string;
+    /** 待機時の表情。**VRM 1.0 のプリセットだけ**（→ D-36 の 1）。 */
+    idleExpression: AvatarExpression;
+    camera: {
+      /** 注視点の高さ（m）。 */
+      targetHeight: number;
+      /** 注視点からの距離（m）。 */
+      distance: number;
+    };
   };
   notification: {
     /** VC に未接続のときの扱い（F-15）。どちらでも配信できなかったことはログに残す。 */
