@@ -7,12 +7,16 @@ import type { AvatarEvent } from '../domain/avatar-event.ts';
 import type { AvatarEventSource } from '../domain/ports/avatar-event-publisher.ts';
 import type { ModelFileReader } from '../domain/ports/model-file-reader.ts';
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
+import type { SpeechAudioStore } from '../domain/ports/speech-audio-store.ts';
+import { wavFromPcm } from '../domain/speech-audio.ts';
 
 export interface AvatarDependencies {
   settings: SettingsProvider;
   models: ModelFileReader;
   /** 発話と会話状態の流れ（F-21, F-22）。 */
   events: AvatarEventSource;
+  /** ブラウザで鳴らす音の置き場（F-23）。 */
+  audio: SpeechAudioStore;
   log: {
     warn(context: Record<string, unknown>, message: string): void;
   };
@@ -67,4 +71,27 @@ export function subscribeAvatarEvents(
   listener: (event: AvatarEvent) => void,
 ): () => void {
   return deps.events.subscribe(listener);
+}
+
+/**
+ * ブラウザで鳴らす音を取り出す（F-23）。
+ *
+ * **消えていることは普通に起こる**（→ D-39 の 5）。溜めているのは直近だけで、
+ * 取りに来るのが遅れれば古いものから捨てられている。**そのときは鳴らさず
+ * 口だけ動く**ので、気付く手がかりはログしかない（INV-7）。
+ */
+export function avatarSpeechAudio(
+  deps: AvatarDependencies,
+  speechId: string,
+): Uint8Array | undefined {
+  const pcm = deps.audio.get(speechId);
+  if (!pcm) {
+    deps.log.warn(
+      { speechId },
+      'The requested speech audio is already gone — the browser will stay silent for it',
+    );
+    return undefined;
+  }
+  // Discord へは PCM のまま渡している。ヘッダを付けるのはブラウザ側だけ。
+  return wavFromPcm(pcm);
 }

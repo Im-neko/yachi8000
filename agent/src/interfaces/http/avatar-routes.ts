@@ -6,12 +6,16 @@ import { streamSSE } from 'hono/streaming';
 import {
   type AvatarDependencies,
   avatarModel,
+  avatarSpeechAudio,
   avatarView,
   subscribeAvatarEvents,
 } from '../../application/avatar.ts';
 
 /** VRM の media type。glTF バイナリと同じ形式。 */
 const VRM_CONTENT_TYPE = 'model/gltf-binary';
+
+/** ブラウザで鳴らす音（F-23）。PCM に WAV のヘッダを付けて返す。 */
+const SPEECH_CONTENT_TYPE = 'audio/wav';
 
 /**
  * 何も起きていない間に流すコメント行の間隔。
@@ -25,7 +29,7 @@ const KEEP_ALIVE_INTERVAL_MS = 25_000;
 /**
  * アバターの表示に要るもの（F-20）。
  *
- * **この 3 本に認証は無い**（→ D-36 の 4、D-37）。守るのは ingress 側で、
+ * **どれにも認証は無い**（→ D-36 の 4、D-37）。守るのは ingress 側で、
  * アプリには認証のコードを入れない。**通知 API（F-18）とは別物** ——
  * あちらは「発話させられる入口」なので自前のトークンを持ち続ける。
  *
@@ -105,9 +109,30 @@ export function createAvatarRouter(deps: AvatarDependencies) {
       }
     });
 
+  /**
+   * ブラウザで鳴らす音（F-23）。**Discord へ流したのと同じ合成結果**。
+   *
+   * **ここは会話の中身そのものを返す**（→ D-39 の 6）。ID は推測できない値
+   * （UUID）で寿命も短いが、**実際の守りは ingress の認証**（D-37）。
+   *
+   * `no-store` にしてあるのは、間に立つものに会話の音を持たせないため。
+   */
+  const getSpeechAudio: ChannelRouteDefinition['handler'] = (c) => {
+    const wav = avatarSpeechAudio(deps, c.req.param('id') ?? '');
+    if (!wav) {
+      // 消えているのは異常ではない（溜めているのは直近だけ）。
+      return c.json({ error: 'その音はもう残っていません。' }, 404);
+    }
+    return c.body(wav as unknown as ArrayBuffer, 200, {
+      'content-type': SPEECH_CONTENT_TYPE,
+      'cache-control': 'no-store',
+    });
+  };
+
   return createChannelRouter([
     { method: 'GET', path: '/avatar/config', handler: getConfig },
     { method: 'GET', path: '/avatar/model', handler: getModel },
     { method: 'GET', path: '/avatar/events', handler: getEvents },
+    { method: 'GET', path: '/avatar/speech/:id', handler: getSpeechAudio },
   ]);
 }

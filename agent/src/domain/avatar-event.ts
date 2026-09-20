@@ -25,7 +25,19 @@ export const AVATAR_STATES: readonly AvatarState[] = [
 export type AvatarEvent =
   | { readonly kind: 'state'; readonly state: AvatarState }
   /**
-   * 1 文を読み上げ始める直前に出る（→ D-38 の 4）。`lipSync.frames` の
-   * 時刻は**このイベントを受け取った時点からの相対**。
+   * 1 文を読み上げ始める直前に出る（→ D-38 の 4）。
+   *
+   * `lipSync.frames` の時刻の 0 秒は、**その文の音の先頭**。ブラウザが
+   * 自分でも音を鳴らしているならその再生位置、鳴らしていないなら
+   * このイベントが届いた時刻になる（→ D-39 の 2）。
    */
-  | { readonly kind: 'speech'; readonly lipSync: VisemeTimeline };
+  | {
+      readonly kind: 'speech';
+      readonly lipSync: VisemeTimeline;
+      /**
+       * 同じ音を取りに行くための ID（F-23）。**音そのものは載せない** ——
+       * 重さでこの流れを塞ぐため（→ D-39 の 4）。取りに行くのが遅れて
+       * 消えていることもある。
+       */
+      readonly speechId: string;
+    };

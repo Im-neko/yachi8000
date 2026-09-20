@@ -7,6 +7,11 @@
   </head>
   <body>
     <canvas id="stage"></canvas>
+    <!--
+      ブラウザでも読み上げを鳴らす（F-23）。既定では鳴らさないので、
+      押されるまで hidden のままにはせず「押せる」状態で置いておく。
+    -->
+    <button id="sound" type="button">音を出す</button>
     <p id="status" role="status"></p>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -67,7 +67,16 @@ export interface VisemeTimeline {
 
 export type AvatarEvent =
   | { kind: 'state'; state: AvatarState }
-  | { kind: 'speech'; lipSync: VisemeTimeline };
+  | { kind: 'speech'; lipSync: VisemeTimeline; speechId: string };
+
+/**
+ * 読み上げた音（F-23）。**イベントには ID だけが載る**ので、鳴らすなら
+ * ここから取りに行く（→ D-39 の 4）。溜まっているのは直近だけで、
+ * 遅れると 404 になる。
+ */
+export function speechAudioUrl(speechId: string): string {
+  return `/api/v1/avatar/speech/${encodeURIComponent(speechId)}`;
+}
 
 /**
  * イベントを購読する。戻り値を呼ぶとやめる。

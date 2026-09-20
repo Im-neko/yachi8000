@@ -43,3 +43,28 @@ body {
 #status[data-kind="error"] {
   background: #5a1c1ccc;
 }
+
+/*
+ * 読み上げをブラウザでも鳴らすボタン（F-23）。**既定では鳴らない**ので、
+ * 押せることが分かる場所に置く（→ D-39 の 3）。
+ */
+#sound {
+  position: fixed;
+  inset: 1rem 1rem auto auto;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid #ffffff33;
+  border-radius: 999px;
+  background: #00000099;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+#sound:hover {
+  border-color: #ffffff66;
+}
+
+#sound[data-enabled="true"] {
+  display: none;
+}

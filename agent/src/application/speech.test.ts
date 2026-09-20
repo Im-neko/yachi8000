@@ -19,6 +19,7 @@ function createHarness() {
   const played: string[] = [];
   const synthesized: string[] = [];
   const events: AvatarEvent[] = [];
+  const stored = new Map<string, string>();
   let connected: VoiceChannelRef | undefined = CHANNEL;
   let pending: { resolve: () => void } | undefined;
   let onPlay: (() => void) | undefined;
@@ -57,6 +58,15 @@ function createHarness() {
         events.push(event);
       },
     },
+    audio: {
+      // 預けた音を ID から引けるようにして、口形と同じ文の音かを確かめる。
+      put: (pcm) => {
+        const id = `audio-${stored.size}`;
+        stored.set(id, new TextDecoder().decode(pcm));
+        return id;
+      },
+      get: () => undefined,
+    },
     presence: createAvatarPresence({
       publish: (event) => {
         events.push(event);
@@ -70,6 +80,7 @@ function createHarness() {
     played,
     synthesized,
     events,
+    stored,
     log,
     disconnect() {
       connected = undefined;
@@ -170,7 +181,7 @@ describe('createSpeechService', () => {
 
     expect(h.events).toEqual([
       { kind: 'state', state: 'speaking' },
-      { kind: 'speech', lipSync: timelineFor('A。') },
+      { kind: 'speech', lipSync: timelineFor('A。'), speechId: 'audio-0' },
     ]);
 
     h.finishPlay();
@@ -189,9 +200,9 @@ describe('createSpeechService', () => {
     await h.waitForPlay();
 
     const spoken = h.events.filter((event) => event.kind === 'speech');
-    expect(spoken).toEqual([
-      { kind: 'speech', lipSync: timelineFor('R1。') },
-      { kind: 'speech', lipSync: timelineFor('N。') },
+    expect(spoken.map((event) => event.lipSync)).toEqual([
+      timelineFor('R1。'),
+      timelineFor('N。'),
     ]);
   });
 
@@ -205,8 +216,24 @@ describe('createSpeechService', () => {
 
     expect(h.played).toEqual(['B。']);
     expect(h.events.filter((event) => event.kind === 'speech')).toEqual([
-      { kind: 'speech', lipSync: timelineFor('B。') },
+      { kind: 'speech', lipSync: timelineFor('B。'), speechId: 'audio-0' },
     ]);
+  });
+
+  // F-23。**Discord へ流すのと同じバイト列**でなければ、口と音がずれる
+  // どころか別の文が鳴る（→ D-39 の 1）。
+  it('ブラウザへ渡す音は、Discord へ流したのと同じ合成結果', async () => {
+    const h = createHarness();
+
+    h.service.speak({ text: 'A。B。', priority: 'reply' });
+    await h.waitForPlay();
+    h.finishPlay();
+    await h.waitForPlay();
+
+    const spoken = h.events.filter((event) => event.kind === 'speech');
+    expect(spoken.map((event) => h.stored.get(event.speechId))).toEqual(
+      h.played,
+    );
   });
 
   it('URL は合成に渡さない（テキスト配信側には残る）', async () => {

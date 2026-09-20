@@ -76,13 +76,15 @@ cd agent && npm run dev     # 5173。API（/api/v1/avatar/*）はこちら
 cd web   && npm run dev     # 5174。ブラウザで開くのはこちら
 ```
 
-確認するのは 3 本:
+確認するのは 4 本:
 
 ```bash
 curl -s http://localhost:5173/api/v1/avatar/config    # 表情とカメラ
 curl -s -o /dev/null -w '%{http_code} %{size_download}\n' \
   http://localhost:5173/api/v1/avatar/model           # VRM 本体
 curl -N  http://localhost:5173/api/v1/avatar/events   # 発話と会話状態（SSE）
+curl -s -o /dev/null -w '%{http_code}\n' \
+  http://localhost:5173/api/v1/avatar/speech/<id>     # 読み上げた音（WAV）
 ```
 
 `404` のときは本文が理由を言う。**「設定されていません」と「置かれていません」は別物** ——
@@ -101,6 +103,18 @@ data: {"kind":"speech","lipSync":{"frames":[{"at":0,"viseme":"sil"},{"at":0.19,"
 
 **ここが無音のまま読み上げが進むなら、口は動かない。** 逆にここが流れていて口が
 動かないなら、原因はブラウザ側（`web/src/stage.ts`）にある。
+
+`speechId` を `/avatar/speech/<id>` に付けると、その文の音（WAV）が取れる。
+**溜めているのは直近だけ**なので、少し待つと `404` になる（異常ではない → D-39 の 5）。
+
+### ブラウザでも鳴らす（F-23）
+
+ページ右上の「音を出す」を押すと、**Discord VC と同じ音がブラウザからも鳴る**。
+押すまで鳴らないのは、VC にも入っている人が二重に聞くのを避けるためと、
+**ブラウザが操作なしに音を出せない**ため（→ D-39 の 3）。
+
+押したあとは**口形が音の再生位置で引かれる**ので、ブラウザの中では音と口がずれない。
+押さなければ今までどおり、イベントが届いた時刻を 0 秒として口だけ動く。
 
 **dev サーバで通っても本番で通るとは限らない。** 本番は agent が `web/dist` を静的に配信する経路で、
 dev サーバの proxy とは別物。最終確認は `cd web && npm run build` した成果物で行う。

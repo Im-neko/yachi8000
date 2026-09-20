@@ -9,8 +9,14 @@ export interface Stage {
   load(url: string, config: AvatarConfig): Promise<void>;
   /** 読み込みの進み具合（0〜1）。分からないときは undefined。 */
   onProgress(handler: (ratio: number | undefined) => void): void;
-  /** 1 文ぶんの口形を流す（F-21）。**受け取った時刻を 0 秒として動かす。** */
-  speak(lipSync: VisemeTimeline): void;
+  /**
+   * 1 文ぶんの口形を流す（F-21）。
+   *
+   * `elapsed` を渡すと**その時計で引く** —— ブラウザでも音を鳴らしている
+   * なら再生位置を渡す。そうすれば音と口は原理的にずれない（→ D-39 の 2）。
+   * 渡さなければ、受け取った時刻を 0 秒として動かす。
+   */
+  speak(lipSync: VisemeTimeline, elapsed?: () => number): void;
   /** 会話の状態を反映する（F-22）。 */
   setState(state: AvatarState): void;
   dispose(): void;
@@ -57,8 +63,8 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   let current: VRM | undefined;
   let idleExpression: AvatarConfig['idleExpression'] = 'neutral';
   let state: AvatarState = 'idle';
-  /** 再生中の口形。`startedAt` は `speak()` が呼ばれた時刻（ミリ秒）。 */
-  let lipSync: { timeline: VisemeTimeline; startedAt: number } | undefined;
+  /** 再生中の口形と、その先頭からの秒数を返す時計。 */
+  let lipSync: { timeline: VisemeTimeline; elapsed: () => number } | undefined;
   /** 今の重み。目標へ向かって毎フレーム寄せる。 */
   const weights = new Map<string, number>();
   let progressHandler: (ratio: number | undefined) => void = () => undefined;
@@ -80,20 +86,18 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   observer.observe(canvas);
 
   /** 読み終わった口形を片付ける。**引くほうでは触らない**（読みと書きを混ぜない）。 */
-  function expireLipSync(now: number): void {
+  function expireLipSync(): void {
     if (!lipSync) return;
-    if ((now - lipSync.startedAt) / 1000 > lipSync.timeline.duration) {
-      lipSync = undefined;
-    }
+    if (lipSync.elapsed() > lipSync.timeline.duration) lipSync = undefined;
   }
 
   /**
    * 今の口形。**時刻で引く** —— フレームレートに合わせて進めると、重いときに
    * 口が声から遅れていく（しかも遅れが戻らない）。
    */
-  function currentViseme(now: number): string | undefined {
+  function currentViseme(): string | undefined {
     if (!lipSync) return undefined;
-    const elapsed = (now - lipSync.startedAt) / 1000;
+    const elapsed = lipSync.elapsed();
     let viseme: string | undefined;
     for (const candidate of lipSync.timeline.frames) {
       if (candidate.at > elapsed) break;
@@ -108,7 +112,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
    * **話している間は待機の表情を薄める。** 待機の表情（`happy` など）は口も
    * 作るので、そのままだと口形と引っ張り合って、どちらも半端になる。
    */
-  function targetExpressions(now: number): Map<string, number> {
+  function targetExpressions(): Map<string, number> {
     const target = new Map<string, number>();
     const add = (name: string, weight: number) =>
       target.set(name, Math.min(1, (target.get(name) ?? 0) + weight));
@@ -119,17 +123,17 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       add('relaxed', 0.6);
     } else add(idleExpression, 1);
 
-    const viseme = currentViseme(now);
+    const viseme = currentViseme();
     if (viseme) add(viseme, 1);
     return target;
   }
 
-  function applyExpressions(delta: number, now: number): void {
-    expireLipSync(now);
+  function applyExpressions(delta: number): void {
+    expireLipSync();
     const manager = current?.expressionManager;
     if (!manager) return;
 
-    const target = targetExpressions(now);
+    const target = targetExpressions();
     // 目標から消えたものも 0 へ向けて戻す。放っておくと前の表情が残る。
     for (const name of weights.keys()) {
       if (!target.has(name)) target.set(name, 0);
@@ -150,7 +154,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     requestAnimationFrame(frame);
     timer.update();
     const delta = timer.getDelta();
-    applyExpressions(delta, performance.now());
+    applyExpressions(delta);
     // 揺れもの・表情・視線はすべて VRM 側の update が進める。
     current?.update(delta);
     controls.update();
@@ -210,10 +214,14 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       progressHandler = handler;
     },
 
-    speak(timeline) {
+    speak(timeline, elapsed) {
       // 前の文がまだ残っていても置き換える。発話は 1 本の経路から順に
       // 来る（INV-5）ので、重なっているなら前のほうが古い。
-      lipSync = { timeline, startedAt: performance.now() };
+      const startedAt = performance.now();
+      lipSync = {
+        timeline,
+        elapsed: elapsed ?? (() => (performance.now() - startedAt) / 1000),
+      };
     },
 
     setState(next) {

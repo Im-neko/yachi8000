@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelFileReader } from '../domain/ports/model-file-reader.ts';
 import type { Settings } from '../domain/settings.ts';
-import { type AvatarDependencies, avatarModel, avatarView } from './avatar.ts';
+import {
+  type AvatarDependencies,
+  avatarModel,
+  avatarSpeechAudio,
+  avatarView,
+} from './avatar.ts';
 
 const CONFIGURED = {
   avatar: {
@@ -16,12 +21,14 @@ const UNCONFIGURED = {} as unknown as Settings;
 function createDeps(
   settings: Settings,
   read: ModelFileReader['read'],
+  stored: Map<string, Uint8Array> = new Map(),
 ): AvatarDependencies & { warnings: string[] } {
   const warnings: string[] = [];
   return {
     settings: { get: () => settings },
     models: { read },
     events: { subscribe: () => () => undefined },
+    audio: { put: () => 'id', get: (id) => stored.get(id) },
     log: {
       warn: (_context, message) => {
         warnings.push(message);
@@ -91,5 +98,30 @@ describe('avatarModel', () => {
     });
     await avatarModel(deps);
     expect(asked).toEqual(['/data/avatar.vrm']);
+  });
+});
+
+describe('avatarSpeechAudio', () => {
+  const missing = async () => undefined;
+
+  it('預けてある音を WAV にして返す', () => {
+    const pcm = new Uint8Array([1, 2, 3, 4]);
+    const deps = createDeps(CONFIGURED, missing, new Map([['abc', pcm]]));
+
+    const wav = avatarSpeechAudio(deps, 'abc');
+    if (!wav) throw new Error('音が返りませんでした');
+
+    expect(String.fromCharCode(...wav.subarray(0, 4))).toBe('RIFF');
+    expect(wav.subarray(44)).toEqual(pcm);
+    expect(deps.warnings).toEqual([]);
+  });
+
+  // 溜めているのは直近だけなので、消えているのは異常ではない（→ D-39 の 5）。
+  // 気付く手がかりはログしかないので、WARN は必ず出す（INV-7）。
+  it('消えていたら undefined を返し、WARN を出す', () => {
+    const deps = createDeps(CONFIGURED, missing);
+
+    expect(avatarSpeechAudio(deps, 'いない')).toBeUndefined();
+    expect(deps.warnings).toHaveLength(1);
   });
 });

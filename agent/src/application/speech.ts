@@ -1,5 +1,6 @@
 import type { VisemeTimeline } from '../domain/lipsync.ts';
 import type { AvatarEventPublisher } from '../domain/ports/avatar-event-publisher.ts';
+import type { SpeechAudioStore } from '../domain/ports/speech-audio-store.ts';
 import type { SpeechSynthesizer } from '../domain/ports/speech-synthesizer.ts';
 import type { VoiceOutput } from '../domain/ports/voice-output.ts';
 import {
@@ -23,6 +24,8 @@ export interface SpeechDependencies {
   voice: VoiceOutput;
   /** アバターへ流す口（F-21, F-22）。**投げっぱなしで、待たない。** */
   avatar: AvatarEventPublisher;
+  /** ブラウザが取りに来るまで音を置いておく場所（F-23）。 */
+  audio: SpeechAudioStore;
   /** 「話している」の出どころ（F-22）。読み上げの区間と一致させる。 */
   presence: { beginSpeaking(): () => void };
   /** 破棄・失敗を表に出すためのログ。握りつぶさない。 */
@@ -120,7 +123,14 @@ export function createSpeechService(deps: SpeechDependencies): SpeechService {
           startPrefetch();
           // **音を出す直前に出す**（→ D-38 の 4）。`play()` の内側に
           // 「鳴り始めた瞬間」を取れる場所は無い。
-          deps.avatar.publish({ kind: 'speech', lipSync: speech.lipSync });
+          //
+          // ブラウザへ渡すのは **Discord へ流すのと同じバイト列**（→ D-39 の 1）。
+          // 合成をもう 1 回するなら、それは経路が 2 本になったということ。
+          deps.avatar.publish({
+            kind: 'speech',
+            lipSync: speech.lipSync,
+            speechId: deps.audio.put(speech.pcm),
+          });
           await deps.voice.play(speech.pcm);
         } catch (error) {
           // 1 文の失敗で残りを捨てない。落とした事実は必ず出す。

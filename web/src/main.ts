@@ -1,18 +1,22 @@
 import {
   AVATAR_MODEL_URL,
   fetchAvatarConfig,
+  speechAudioUrl,
   subscribeAvatarEvents,
 } from './api.ts';
+import { createSpeechAudio } from './audio.ts';
 import { createStage } from './stage.ts';
 import './style.css';
 
 const canvasElement = document.querySelector<HTMLCanvasElement>('#stage');
 const statusElement = document.querySelector<HTMLParagraphElement>('#status');
-if (!canvasElement || !statusElement) {
+const soundElement = document.querySelector<HTMLButtonElement>('#sound');
+if (!canvasElement || !statusElement || !soundElement) {
   throw new Error('ページの土台が見つかりません。');
 }
 const canvas: HTMLCanvasElement = canvasElement;
 const status: HTMLParagraphElement = statusElement;
+const sound: HTMLButtonElement = soundElement;
 
 /**
  * 進み具合と失敗を画面に出す。
@@ -24,6 +28,22 @@ function show(message: string, kind: 'info' | 'error' = 'info'): void {
   status.textContent = message;
   status.dataset.kind = kind;
 }
+
+/**
+ * 読み上げをブラウザでも鳴らす（F-23）。**押されるまで鳴らない**
+ * （→ D-39 の 3）。押せなかったら、その旨を出して口だけ動かす。
+ */
+const audio = createSpeechAudio();
+sound.addEventListener('click', () => {
+  audio
+    .enable()
+    .then(() => {
+      sound.dataset.enabled = 'true';
+    })
+    .catch(() => {
+      show('このブラウザでは音を鳴らせませんでした。口だけ動きます。');
+    });
+});
 
 const stage = createStage(canvas);
 stage.onProgress((ratio) => {
@@ -48,8 +68,16 @@ try {
    */
   subscribeAvatarEvents(
     (event) => {
-      if (event.kind === 'speech') stage.speak(event.lipSync);
-      else stage.setState(event.state);
+      if (event.kind !== 'speech') {
+        stage.setState(event.state);
+        return;
+      }
+      // **音を鳴らせたなら、その再生位置で口を引く**（→ D-39 の 2）。
+      // 鳴らせなければ届いた時刻を 0 秒にする（今までと同じ）。
+      audio
+        .play(speechAudioUrl(event.speechId))
+        .then((playback) => stage.speak(event.lipSync, playback?.elapsed))
+        .catch(() => stage.speak(event.lipSync));
     },
     (connected) => {
       show(connected ? '' : '発話イベントに繋がっていません（再接続中）。');

@@ -25,6 +25,7 @@ import type { IssueTracker } from './domain/ports/issue-tracker.ts';
 import type { SpeechSynthesizer } from './domain/ports/speech-synthesizer.ts';
 import { createAvatarEventBroadcaster } from './infrastructure/avatar/avatar-event-broadcaster.ts';
 import { createFileModelReader } from './infrastructure/avatar/file-model-reader.ts';
+import { createMemorySpeechAudioStore } from './infrastructure/avatar/memory-speech-audio-store.ts';
 import { openAppDatabase } from './infrastructure/db/app-database.ts';
 import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
@@ -135,6 +136,13 @@ export const issueDependencies: IssueDependencies = {
  */
 const avatarEvents = createAvatarEventBroadcaster({ log: logger });
 
+/**
+ * ブラウザで鳴らす音の置き場（F-23）。**メモリだけ・直近だけ**（→ D-39 の 5）。
+ *
+ * 出す側（発話キュー）と取り出す側（HTTP のルート）が同じ実体を見る。
+ */
+const speechAudio = createMemorySpeechAudioStore();
+
 /** 会話の状態（F-22）。数えて一番強いものを出す。 */
 export const avatarPresence: AvatarPresence =
   createAvatarPresence(avatarEvents);
@@ -144,6 +152,7 @@ export const avatarDependencies: AvatarDependencies = {
   settings,
   models: createFileModelReader(),
   events: avatarEvents,
+  audio: speechAudio,
   log: logger,
 };
 
@@ -176,6 +185,7 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
     synthesizer,
     voice,
     avatar: avatarEvents,
+    audio: speechAudio,
     presence: avatarPresence,
     log: logger,
   });

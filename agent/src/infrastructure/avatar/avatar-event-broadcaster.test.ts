@@ -5,6 +5,7 @@ import { createAvatarEventBroadcaster } from './avatar-event-broadcaster.ts';
 const SPEECH: AvatarEvent = {
   kind: 'speech',
   lipSync: { frames: [{ at: 0, viseme: 'aa' }], duration: 0.3 },
+  speechId: 'audio-1',
 };
 
 function setup() {
