@@ -69,8 +69,9 @@ export async function avatarModel(
 export function subscribeAvatarEvents(
   deps: AvatarDependencies,
   listener: (event: AvatarEvent) => void,
+  onClose?: () => void,
 ): () => void {
-  return deps.events.subscribe(listener);
+  return deps.events.subscribe(listener, onClose);
 }
 
 /**

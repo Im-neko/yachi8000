@@ -18,6 +18,14 @@ export interface AvatarEventPublisher {
  * ページを開いた人が、次の発話まで待機の顔のまま止まらないようにするため。
  */
 export interface AvatarEventSource {
-  /** 戻り値を呼ぶと購読をやめる。 */
-  subscribe(listener: (event: AvatarEvent) => void): () => void;
+  /**
+   * 戻り値を呼ぶと購読をやめる。
+   *
+   * `onClose` は**配る側から打ち切られたとき**に呼ばれる（停止処理）。
+   * これが無いと、開いたままの配信が停止をぶら下げる（→ D-38 の 5）。
+   */
+  subscribe(
+    listener: (event: AvatarEvent) => void,
+    onClose?: () => void,
+  ): () => void;
 }

@@ -84,7 +84,7 @@ curl -s -o /dev/null -w '%{http_code} %{size_download}\n' \
   http://localhost:5173/api/v1/avatar/model           # VRM 本体
 curl -N  http://localhost:5173/api/v1/avatar/events   # 発話と会話状態（SSE）
 curl -s -o /dev/null -w '%{http_code}\n' \
-  http://localhost:5173/api/v1/avatar/speech/<id>     # 読み上げた音（WAV）
+  'http://localhost:5173/api/v1/avatar/speech?id=<id>' # 読み上げた音（WAV）
 ```
 
 `404` のときは本文が理由を言う。**「設定されていません」と「置かれていません」は別物** ——
@@ -104,7 +104,7 @@ data: {"kind":"speech","lipSync":{"frames":[{"at":0,"viseme":"sil"},{"at":0.19,"
 **ここが無音のまま読み上げが進むなら、口は動かない。** 逆にここが流れていて口が
 動かないなら、原因はブラウザ側（`web/src/stage.ts`）にある。
 
-`speechId` を `/avatar/speech/<id>` に付けると、その文の音（WAV）が取れる。
+`speechId` を `/avatar/speech?id=` に付けると、その文の音（WAV）が取れる。
 **溜めているのは直近だけ**なので、少し待つと `404` になる（異常ではない → D-39 の 5）。
 
 ### ブラウザでも鳴らす（F-23）

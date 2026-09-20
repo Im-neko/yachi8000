@@ -1,7 +1,4 @@
-import {
-  type ChannelRouteDefinition,
-  createChannelRouter,
-} from '@flue/runtime';
+import type { ChannelRouteDefinition } from '@flue/runtime';
 import { streamSSE } from 'hono/streaming';
 import {
   type AvatarDependencies,
@@ -37,7 +34,9 @@ const KEEP_ALIVE_INTERVAL_MS = 25_000;
  * 読む（→ D-36 の 2）。受けたパスを読む作りにすると、表示のために開けた口が
  * ファイルシステムの覗き穴になる。
  */
-export function createAvatarRouter(deps: AvatarDependencies) {
+export function createAvatarRoutes(
+  deps: AvatarDependencies,
+): ChannelRouteDefinition[] {
   const getConfig: ChannelRouteDefinition['handler'] = (c) => {
     const view = avatarView(deps);
     if (!view) {
@@ -83,17 +82,28 @@ export function createAvatarRouter(deps: AvatarDependencies) {
     streamSSE(c, async (stream) => {
       // ストリームが閉じるまで解決しない Promise。streamSSE はこの関数が
       // 返った時点で接続を閉じるので、待ち続ける必要がある。
+      //
+      // **終わり方は 2 つある。** ブラウザが閉じたとき（onAbort）と、
+      // こちらから打ち切ったとき（停止処理 → closeAll）。**後者が無いと、
+      // 開いたままの配信が停止をぶら下げる** —— Flue のチャンネルルーターは
+      // 流しっぱなしの応答が終わるまで待つ（→ D-38 の 5）。
+      let finish: () => void = () => undefined;
       const closed = new Promise<void>((resolve) => {
+        finish = resolve;
         stream.onAbort(resolve);
       });
 
-      const unsubscribe = subscribeAvatarEvents(deps, (event) => {
-        // 書き込みは待たない。**遅い購読者のために読み上げを止めない**
-        // （port の約束どおり投げっぱなし）。
-        void stream
-          .writeSSE({ event: event.kind, data: JSON.stringify(event) })
-          .catch(() => undefined);
-      });
+      const unsubscribe = subscribeAvatarEvents(
+        deps,
+        (event) => {
+          // 書き込みは待たない。**遅い購読者のために読み上げを止めない**
+          // （port の約束どおり投げっぱなし）。
+          void stream
+            .writeSSE({ event: event.kind, data: JSON.stringify(event) })
+            .catch(() => undefined);
+        },
+        () => finish(),
+      );
 
       const keepAlive = setInterval(() => {
         void stream
@@ -116,9 +126,13 @@ export function createAvatarRouter(deps: AvatarDependencies) {
    * （UUID）で寿命も短いが、**実際の守りは ingress の認証**（D-37）。
    *
    * `no-store` にしてあるのは、間に立つものに会話の音を持たせないため。
+   *
+   * **ID はクエリで受ける。** Flue のチャンネルルーターは**パスを文字列一致
+   * で引く**ので、`/speech/:id` のようなパラメータは一生マッチしない
+   * （実機で 404 になって気付いた）。
    */
   const getSpeechAudio: ChannelRouteDefinition['handler'] = (c) => {
-    const wav = avatarSpeechAudio(deps, c.req.param('id') ?? '');
+    const wav = avatarSpeechAudio(deps, c.req.query('id') ?? '');
     if (!wav) {
       // 消えているのは異常ではない（溜めているのは直近だけ）。
       return c.json({ error: 'その音はもう残っていません。' }, 404);
@@ -129,10 +143,10 @@ export function createAvatarRouter(deps: AvatarDependencies) {
     });
   };
 
-  return createChannelRouter([
+  return [
     { method: 'GET', path: '/avatar/config', handler: getConfig },
     { method: 'GET', path: '/avatar/model', handler: getModel },
     { method: 'GET', path: '/avatar/events', handler: getEvents },
-    { method: 'GET', path: '/avatar/speech/:id', handler: getSpeechAudio },
-  ]);
+    { method: 'GET', path: '/avatar/speech', handler: getSpeechAudio },
+  ];
 }

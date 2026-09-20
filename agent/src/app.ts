@@ -1,11 +1,12 @@
 import { existsSync } from 'node:fs';
-import { setProvider } from '@flue/runtime';
+import { createChannelRouter, setProvider } from '@flue/runtime';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import type { ReminderDeliveryDependencies } from './application/reminder.ts';
 import { fireDueReminders } from './application/reminder.ts';
 import {
   avatarDependencies,
+  avatarEvents,
   createVoiceRuntime,
   memoryStore,
   personaDependencies,
@@ -17,9 +18,9 @@ import { startDiscordGateway } from './infrastructure/discord/gateway.ts';
 import { createLlmProxyProvider } from './infrastructure/llm/provider.ts';
 import { registerMessageHandler } from './interfaces/discord/message-handler.ts';
 import { registerSlashCommands } from './interfaces/discord/slash-commands.ts';
-import { createAvatarRouter } from './interfaces/http/avatar-routes.ts';
+import { createAvatarRoutes } from './interfaces/http/avatar-routes.ts';
 import { createDebugRouter } from './interfaces/http/debug-routes.ts';
-import { createNotifyRouter } from './interfaces/http/notify-routes.ts';
+import { createNotifyRoutes } from './interfaces/http/notify-routes.ts';
 import { logger } from './observability/logger.ts';
 
 /**
@@ -97,17 +98,26 @@ startReminderPoller(voice.reminder);
 const app = new Hono();
 app.get('/api/v1/health', (c) => c.json({ status: 'ok' }));
 
+/**
+ * `/api/v1` 配下は **1 本のルーターにまとめて載せる。**
+ *
+ * `createChannelRouter` は `app.all("/:suffix{.+}")` で**配下を全部取る** ——
+ * 同じ前置きに 2 本載せると、**先に載せたほうが知らないパスまで飲み込んで
+ * 404 にする。** 実機でアバターの API が丸ごと 404 になって気付いた。
+ * ルートを足すときは、この配列に足すこと。
+ */
 app.route(
   '/api/v1',
-  createNotifyRouter({
-    tokens: env.NOTIFY_TOKENS,
-    notifyDependencies: voice.notify,
-    voiceDependencies: voice.voiceSession,
-    log: logger,
-  }),
+  createChannelRouter([
+    ...createNotifyRoutes({
+      tokens: env.NOTIFY_TOKENS,
+      notifyDependencies: voice.notify,
+      voiceDependencies: voice.voiceSession,
+      log: logger,
+    }),
+    ...createAvatarRoutes(avatarDependencies),
+  ]),
 );
-
-app.route('/api/v1', createAvatarRouter(avatarDependencies));
 
 if (env.DEBUG_MODE) {
   app.route('/debug', createDebugRouter(voice.voiceSession));
@@ -135,6 +145,21 @@ if (existsSync(env.WEB_DIST_PATH)) {
     { path: env.WEB_DIST_PATH },
     'No web frontend build found — the avatar page will not be served',
   );
+}
+
+/**
+ * 停止するときに、開いたままの発話イベント配信を打ち切る（→ D-38 の 5）。
+ *
+ * **Flue は流しっぱなしの応答が終わるまで停止を待つ**（`retainActivityLease`）。
+ * ページを開いたままの人が 1 人いるだけで、**更新戦略が `Recreate` なので
+ * デプロイのたびに停止がタイムアウトまでぶら下がる。**
+ */
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, () => {
+    const open = avatarEvents.subscribers();
+    if (open > 0) logger.info({ open }, 'Closing open avatar event streams');
+    avatarEvents.closeAll();
+  });
 }
 
 logger.info(

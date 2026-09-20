@@ -75,7 +75,7 @@ export type AvatarEvent =
  * 遅れると 404 になる。
  */
 export function speechAudioUrl(speechId: string): string {
-  return `/api/v1/avatar/speech/${encodeURIComponent(speechId)}`;
+  return `/api/v1/avatar/speech?id=${encodeURIComponent(speechId)}`;
 }
 
 /**

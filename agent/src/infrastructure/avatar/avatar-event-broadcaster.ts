@@ -16,6 +16,14 @@ export interface AvatarEventBroadcaster
     AvatarEventSource {
   /** 今つながっている購読者の数。ログと状態表示用。 */
   subscribers(): number;
+  /**
+   * 全員の購読を打ち切る。**停止処理から呼ぶ**（→ D-38 の 5）。
+   *
+   * Flue のチャンネルルーターは**流しっぱなしの応答が終わるまで停止を待つ**
+   * （`retainActivityLease`）。ページを開いたままの人が 1 人いるだけで、
+   * デプロイのたびに停止がタイムアウトまでぶら下がる。
+   */
+  closeAll(): void;
 }
 
 export interface CreateAvatarEventBroadcasterInput {
@@ -27,7 +35,12 @@ export interface CreateAvatarEventBroadcasterInput {
 export function createAvatarEventBroadcaster(
   input: CreateAvatarEventBroadcasterInput,
 ): AvatarEventBroadcaster {
-  const listeners = new Set<(event: AvatarEvent) => void>();
+  interface Subscriber {
+    deliver(event: AvatarEvent): void;
+    close?: () => void;
+  }
+
+  const listeners = new Set<Subscriber>();
 
   /**
    * 最後に出した状態（F-22）。**購読した直後にこれを流す。**
@@ -35,9 +48,9 @@ export function createAvatarEventBroadcaster(
    */
   let state: AvatarEvent = { kind: 'state', state: 'idle' };
 
-  function emit(listener: (event: AvatarEvent) => void, event: AvatarEvent) {
+  function emit(subscriber: Subscriber, event: AvatarEvent) {
     try {
-      listener(event);
+      subscriber.deliver(event);
     } catch (error) {
       // 1 人の購読者が投げても、読み上げも他の購読者も巻き込まない。
       input.log.error(
@@ -53,14 +66,29 @@ export function createAvatarEventBroadcaster(
       for (const listener of listeners) emit(listener, event);
     },
 
-    subscribe(listener) {
-      listeners.add(listener);
-      emit(listener, state);
+    subscribe(listener, onClose) {
+      const subscriber: Subscriber = { deliver: listener, close: onClose };
+      listeners.add(subscriber);
+      emit(subscriber, state);
       return () => {
-        listeners.delete(listener);
+        listeners.delete(subscriber);
       };
     },
 
     subscribers: () => listeners.size,
+
+    closeAll() {
+      for (const subscriber of listeners) {
+        try {
+          subscriber.close?.();
+        } catch (error) {
+          input.log.error(
+            { err: error },
+            'Failed to close an avatar event subscriber',
+          );
+        }
+      }
+      listeners.clear();
+    },
   };
 }

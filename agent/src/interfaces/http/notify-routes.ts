@@ -1,7 +1,4 @@
-import {
-  type ChannelRouteDefinition,
-  createChannelRouter,
-} from '@flue/runtime';
+import type { ChannelRouteDefinition } from '@flue/runtime';
 import * as v from 'valibot';
 import type { NotifyDependencies } from '../../application/notify.ts';
 import {
@@ -63,7 +60,9 @@ export interface NotifyRoutesInput {
  * 応答は「受理したか」だけを返し、読み上げ完了までブロックしない。
  * 状態にもチャンネル ID が乗るので、同じ認証をかける。
  */
-export function createNotifyRouter(input: NotifyRoutesInput) {
+export function createNotifyRoutes(
+  input: NotifyRoutesInput,
+): ChannelRouteDefinition[] {
   const authenticate = createNotifyAuthenticator(input.tokens);
 
   function sourceOf(
@@ -120,8 +119,8 @@ export function createNotifyRouter(input: NotifyRoutesInput) {
     });
   };
 
-  return createChannelRouter([
+  return [
     { method: 'POST', path: '/notify', handler: postNotify },
     { method: 'GET', path: '/voice/status', handler: getStatus },
-  ]);
+  ];
 }

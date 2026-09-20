@@ -134,7 +134,7 @@ export const issueDependencies: IssueDependencies = {
  * **1 つだけ作る。** 出す側（発話キュー・1 ターンの実行）と受け取る側
  * （SSE のルート）が同じ実体を見ていないと、口が動かないまま声だけ出る。
  */
-const avatarEvents = createAvatarEventBroadcaster({ log: logger });
+export const avatarEvents = createAvatarEventBroadcaster({ log: logger });
 
 /**
  * ブラウザで鳴らす音の置き場（F-23）。**メモリだけ・直近だけ**（→ D-39 の 5）。
