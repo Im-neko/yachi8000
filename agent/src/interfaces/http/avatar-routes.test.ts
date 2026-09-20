@@ -23,7 +23,10 @@ function createHarness(settings: Settings = CONFIGURED) {
     settings: { get: () => settings },
     models: { read: async () => undefined },
     events: {
-      subscribe: (listener, close) => {
+      subscribe: (
+        listener: (event: AvatarEvent) => void,
+        close?: () => void,
+      ) => {
         subscribers.push({ listener, close });
         listener({ kind: 'state', state: 'idle' });
         return () => undefined;
