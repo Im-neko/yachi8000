@@ -15,7 +15,7 @@ function bodyOf(message: DeliveredMessageInput): string {
 }
 
 /**
- * どの入口（Discord、デバッグ用 HTTP、将来の Slack）も必ずここを通す。
+ * どの入口（Discord、デバッグ用 HTTP）も必ずここを通す。
  *
  * 入口ごとの関心事（署名検証・応答判定・返信の送り方）は呼び出し側に残し、
  * この関数はテナントのエージェントインスタンスへ渡して返事を読むだけにする。

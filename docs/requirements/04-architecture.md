@@ -8,7 +8,7 @@
 
 後続フェーズの設計は、ここから継承する不変条件を明示的に再掲すること。散文の中に埋めると数フェーズで風化する。
 
-**INV-1. 非公式手段を使わない。** Discord への映像送信、Slack Huddle への参加は、動く実装が世に存在しても採用しない（→ C-01, C-02）。
+**INV-1. 非公式手段を使わない。** Discord への映像送信は、動く実装が世に存在しても採用しない（→ C-01）。
 
 **INV-2. 3D 描画はブラウザに閉じる。** サーバは状態とイベントを配信するのみ。サーバサイドの WebGL / ヘッドレスレンダリングは実装しない（→ C-06）。
 
@@ -34,7 +34,7 @@
 |---|---|---|
 | domain | 会話ターン、人格（既定 + 変化差分の合成規則）、リマインダー、スキル候補、発話イベント、通知。および各 port の interface | なし |
 | application | 「発話を受けて応答を作る」「通知を読み上げ文に変える」「リマインダーを発火させる」「スキル候補を評価する」「人格を組み立てる（固定モードの判定を含む）」 | domain のみ |
-| infrastructure | Discord Bot / VC、Slack App、VOICEVOX クライアント、STT、LLM プロバイダ、SQLite リポジトリ、pgvector リポジトリ | 何でも |
+| infrastructure | Discord Bot / VC、VOICEVOX クライアント、STT、LLM プロバイダ、SQLite リポジトリ、pgvector リポジトリ | 何でも |
 | interfaces | HTTP ルート（通知 API・ヘルスチェック）、アバター用 WebSocket、表示整形（Discord embed・CLI 出力等） | domain / application |
 | 合成ルート | `app.ts`、`agents/*.agent.ts` | 全層 |
 
