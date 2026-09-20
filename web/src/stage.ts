@@ -2,15 +2,32 @@ import { type VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import type { AvatarConfig } from './api.ts';
+import type { AvatarConfig, AvatarState, VisemeTimeline } from './api.ts';
 
 export interface Stage {
   /** VRM を読み込んで差し替える。前のモデルは破棄する（F-62）。 */
   load(url: string, config: AvatarConfig): Promise<void>;
   /** 読み込みの進み具合（0〜1）。分からないときは undefined。 */
   onProgress(handler: (ratio: number | undefined) => void): void;
+  /** 1 文ぶんの口形を流す（F-21）。**受け取った時刻を 0 秒として動かす。** */
+  speak(lipSync: VisemeTimeline): void;
+  /** 会話の状態を反映する（F-22）。 */
+  setState(state: AvatarState): void;
   dispose(): void;
 }
+
+/**
+ * 表情が目標値へ寄る時定数（秒）。
+ *
+ * **口形を段差で切り替えると、モーラごとに口がパチパチ弾ける。** かといって
+ * 遅すぎると、短いモーラが隣に埋もれて口が開かない。1 モーラは速い話速で
+ * 0.05 秒ほどなので、その内に 8 割方たどり着く速さにしてある。
+ *
+ * **フレームレートに依らせない。** `delta * 係数` で寄せると、60fps と
+ * 20fps で見た目の速さが変わる（重い機械ほど口が速く切り替わる、という
+ * 逆立ちした挙動になる）。
+ */
+const EXPRESSION_ATTACK_SECONDS = 0.03;
 
 /**
  * three.js の土台（F-20）。
@@ -38,6 +55,12 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   scene.add(key);
 
   let current: VRM | undefined;
+  let idleExpression: AvatarConfig['idleExpression'] = 'neutral';
+  let state: AvatarState = 'idle';
+  /** 再生中の口形。`startedAt` は `speak()` が呼ばれた時刻（ミリ秒）。 */
+  let lipSync: { timeline: VisemeTimeline; startedAt: number } | undefined;
+  /** 今の重み。目標へ向かって毎フレーム寄せる。 */
+  const weights = new Map<string, number>();
   let progressHandler: (ratio: number | undefined) => void = () => undefined;
   // Clock は r183 で非推奨。Timer は Page Visibility API を使えるので、
   // タブが隠れている間に溜まった時間を delta に流し込まない（揺れものが暴れる）。
@@ -56,11 +79,78 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   const observer = new ResizeObserver(resize);
   observer.observe(canvas);
 
+  /** 読み終わった口形を片付ける。**引くほうでは触らない**（読みと書きを混ぜない）。 */
+  function expireLipSync(now: number): void {
+    if (!lipSync) return;
+    if ((now - lipSync.startedAt) / 1000 > lipSync.timeline.duration) {
+      lipSync = undefined;
+    }
+  }
+
+  /**
+   * 今の口形。**時刻で引く** —— フレームレートに合わせて進めると、重いときに
+   * 口が声から遅れていく（しかも遅れが戻らない）。
+   */
+  function currentViseme(now: number): string | undefined {
+    if (!lipSync) return undefined;
+    const elapsed = (now - lipSync.startedAt) / 1000;
+    let viseme: string | undefined;
+    for (const candidate of lipSync.timeline.frames) {
+      if (candidate.at > elapsed) break;
+      viseme = candidate.viseme;
+    }
+    return viseme === 'sil' ? undefined : viseme;
+  }
+
+  /**
+   * 目標の表情。会話の状態（F-22）と口形（F-21）を重ねる。
+   *
+   * **話している間は待機の表情を薄める。** 待機の表情（`happy` など）は口も
+   * 作るので、そのままだと口形と引っ張り合って、どちらも半端になる。
+   */
+  function targetExpressions(now: number): Map<string, number> {
+    const target = new Map<string, number>();
+    const add = (name: string, weight: number) =>
+      target.set(name, Math.min(1, (target.get(name) ?? 0) + weight));
+
+    if (state === 'speaking') add(idleExpression, 0.4);
+    else if (state === 'thinking') {
+      add(idleExpression, 0.3);
+      add('relaxed', 0.6);
+    } else add(idleExpression, 1);
+
+    const viseme = currentViseme(now);
+    if (viseme) add(viseme, 1);
+    return target;
+  }
+
+  function applyExpressions(delta: number, now: number): void {
+    expireLipSync(now);
+    const manager = current?.expressionManager;
+    if (!manager) return;
+
+    const target = targetExpressions(now);
+    // 目標から消えたものも 0 へ向けて戻す。放っておくと前の表情が残る。
+    for (const name of weights.keys()) {
+      if (!target.has(name)) target.set(name, 0);
+    }
+
+    const rate = 1 - Math.exp(-delta / EXPRESSION_ATTACK_SECONDS);
+    for (const [name, goal] of target) {
+      const value =
+        (weights.get(name) ?? 0) + (goal - (weights.get(name) ?? 0)) * rate;
+      if (goal === 0 && value < 0.01) weights.delete(name);
+      else weights.set(name, value);
+      manager.setValue(name, goal === 0 && value < 0.01 ? 0 : value);
+    }
+  }
+
   function frame(): void {
     if (!running) return;
     requestAnimationFrame(frame);
     timer.update();
     const delta = timer.getDelta();
+    applyExpressions(delta, performance.now());
     // 揺れもの・表情・視線はすべて VRM 側の update が進める。
     current?.update(delta);
     controls.update();
@@ -103,8 +193,11 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       current = vrm;
 
       // 待機時の表情（→ D-36 の 1）。プリセット名しか受け取らないので、
-      // モデルを差し替えても同じ名前で通る。
-      vrm.expressionManager?.setValue(config.idleExpression, 1);
+      // モデルを差し替えても同じ名前で通る。実際に当てるのは毎フレームの
+      // applyExpressions で、ここでは目標だけを覚える。
+      idleExpression = config.idleExpression;
+      weights.clear();
+      lipSync = undefined;
 
       const { targetHeight, distance } = config.camera;
       controls.target.set(0, targetHeight, 0);
@@ -117,8 +210,22 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       progressHandler = handler;
     },
 
+    speak(timeline) {
+      // 前の文がまだ残っていても置き換える。発話は 1 本の経路から順に
+      // 来る（INV-5）ので、重なっているなら前のほうが古い。
+      lipSync = { timeline, startedAt: performance.now() };
+    },
+
+    setState(next) {
+      state = next;
+      // 話し終わったら口を閉じる。イベントが落ちて開きっぱなしになるより、
+      // 閉じすぎるほうがまだ見られる。
+      if (next !== 'speaking') lipSync = undefined;
+    },
+
     dispose() {
       running = false;
+      lipSync = undefined;
       timer.dispose();
       observer.disconnect();
       controls.dispose();

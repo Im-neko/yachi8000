@@ -1,4 +1,5 @@
 import * as v from 'valibot';
+import { buildVisemeTimeline, type Mora } from '../../domain/lipsync.ts';
 import type { SettingsProvider } from '../../domain/ports/settings-provider.ts';
 import type {
   SpeechSynthesizer,
@@ -27,25 +28,51 @@ const SpeakersSchema = v.array(
 );
 
 /**
- * リップシンク（F-21）に必要な最小限だけを検証する。合成そのものは
- * `/synthesis` が返すバイト列で判断するため、ここでは扱わない。
+ * リップシンク（F-21）に必要な分だけを読む。合成そのものは `/synthesis` が
+ * 返すバイト列で判断するため、ここでは扱わない。
+ *
+ * **クエリ全体はそのまま `/synthesis` へ渡す。** ここで作り直すと、この
+ * スキーマに書いていない項目（`intonationScale` など）が落ちる。
  */
+const MoraSchema = v.object({
+  text: v.string(),
+  vowel: v.string(),
+  vowel_length: v.number(),
+  consonant_length: v.nullish(v.number()),
+});
+
 const AudioQuerySchema = v.object({
   accent_phrases: v.pipe(
     v.array(
       v.object({
-        moras: v.array(
-          v.object({
-            text: v.string(),
-            vowel: v.string(),
-            vowel_length: v.number(),
-          }),
-        ),
+        moras: v.array(MoraSchema),
+        pause_mora: v.nullish(MoraSchema),
       }),
     ),
     v.minLength(1),
   ),
+  prePhonemeLength: v.number(),
+  postPhonemeLength: v.number(),
 });
+
+type ParsedAudioQuery = v.InferOutput<typeof AudioQuerySchema>;
+
+/**
+ * アクセント句をまたいで 1 本のモーラ列にする。**句の切れ目の間
+ * （`pause_mora`）も同じ列に混ぜる** —— 口を閉じる時間も長さのうちで、
+ * 落とすと以降の口形が全部前にずれる。
+ */
+function morasOf(query: ParsedAudioQuery): Mora[] {
+  return query.accent_phrases.flatMap((phrase) =>
+    [...phrase.moras, ...(phrase.pause_mora ? [phrase.pause_mora] : [])].map(
+      (mora) => ({
+        vowel: mora.vowel,
+        vowelLength: mora.vowel_length,
+        consonantLength: mora.consonant_length,
+      }),
+    ),
+  );
+}
 
 export interface CreateVoicevoxSynthesizerInput {
   /** エンジンのベース URL。コードにホスト名も既定の話者も埋め込まない（D-05）。 */
@@ -96,6 +123,16 @@ export function createVoicevoxSynthesizer(
       query.outputSamplingRate = OUTPUT_SAMPLING_RATE;
       query.outputStereo = true;
 
+      // 起動時に契約を確かめてある（verifyContract）ので、ここで読めないのは
+      // エンジンが途中で入れ替わったとき。**縮退させずに落とす** ——
+      // 口が動かないまま声だけ出るのは、黙って壊れている状態そのもの。
+      const parsed = v.safeParse(AudioQuerySchema, query);
+      if (!parsed.success) {
+        throw new Error(
+          `音声合成エンジンの /audio_query を解釈できませんでした（リップシンクが作れません）: ${v.summarize(parsed.issues)}`,
+        );
+      }
+
       const response = await request(
         `/synthesis?speaker=${speakerId}`,
         {
@@ -107,7 +144,17 @@ export function createVoicevoxSynthesizer(
       );
 
       const wav = new Uint8Array(await response.arrayBuffer());
-      return { pcm: extractPcm(wav) };
+      return {
+        pcm: extractPcm(wav),
+        // 長さは常に等倍で返るので、実際に鳴る時刻にするには送った
+        // speedScale で割る（実測、→ D-38 の 2）。
+        lipSync: buildVisemeTimeline({
+          moras: morasOf(parsed.output),
+          speedScale,
+          leadingSilence: parsed.output.prePhonemeLength,
+          trailingSilence: parsed.output.postPhonemeLength,
+        }),
+      };
     },
 
     async verifyContract(): Promise<void> {

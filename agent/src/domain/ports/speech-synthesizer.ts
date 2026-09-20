@@ -1,6 +1,13 @@
+import type { VisemeTimeline } from '../lipsync.ts';
+
 export interface SynthesizedSpeech {
   /** 48000Hz / 2ch / 16bit LE の PCM。WAV ヘッダは含まない。 */
   readonly pcm: Uint8Array;
+  /**
+   * 口形の切り替え時刻（F-21）。**音と同じ合成から作る** ——
+   * 別の経路で取り直すと、話速を変えた瞬間に口だけずれる（→ D-38 の 2）。
+   */
+  readonly lipSync: VisemeTimeline;
 }
 
 /**

@@ -1,4 +1,8 @@
-import { AVATAR_MODEL_URL, fetchAvatarConfig } from './api.ts';
+import {
+  AVATAR_MODEL_URL,
+  fetchAvatarConfig,
+  subscribeAvatarEvents,
+} from './api.ts';
 import { createStage } from './stage.ts';
 import './style.css';
 
@@ -34,6 +38,23 @@ try {
   const config = await fetchAvatarConfig();
   await stage.load(AVATAR_MODEL_URL, config);
   show('');
+
+  /**
+   * 発話と会話状態を受け取る（F-21, F-22）。**モデルが映ってから繋ぐ** ——
+   * 読み込みの数秒の間に来たイベントは、どのみち動かす先が無い。
+   *
+   * **繋がらなくてもアバターは映ったまま。** 口が動かないだけで、
+   * 「表示できませんでした」にはしない（→ INV-7 の部分縮退）。
+   */
+  subscribeAvatarEvents(
+    (event) => {
+      if (event.kind === 'speech') stage.speak(event.lipSync);
+      else stage.setState(event.state);
+    },
+    (connected) => {
+      show(connected ? '' : '発話イベントに繋がっていません（再接続中）。');
+    },
+  );
 } catch (error) {
   // 失敗の中身をそのまま出す。「読み込めません」だけだと、モデルが置かれて
   // いないのか設定が間違っているのかが分からない。

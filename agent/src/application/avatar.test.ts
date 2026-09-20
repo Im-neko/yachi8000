@@ -21,6 +21,7 @@ function createDeps(
   return {
     settings: { get: () => settings },
     models: { read },
+    events: { subscribe: () => () => undefined },
     log: {
       warn: (_context, message) => {
         warnings.push(message);

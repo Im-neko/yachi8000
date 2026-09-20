@@ -3,12 +3,16 @@ import {
   avatarModelPathOf,
   avatarViewOf,
 } from '../domain/avatar.ts';
+import type { AvatarEvent } from '../domain/avatar-event.ts';
+import type { AvatarEventSource } from '../domain/ports/avatar-event-publisher.ts';
 import type { ModelFileReader } from '../domain/ports/model-file-reader.ts';
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
 
 export interface AvatarDependencies {
   settings: SettingsProvider;
   models: ModelFileReader;
+  /** 発話と会話状態の流れ（F-21, F-22）。 */
+  events: AvatarEventSource;
   log: {
     warn(context: Record<string, unknown>, message: string): void;
   };
@@ -51,4 +55,16 @@ export async function avatarModel(
     return { kind: 'missing' };
   }
   return { kind: 'ok', bytes };
+}
+
+/**
+ * 発話と会話状態を購読する（F-21, F-22）。戻り値を呼ぶと購読をやめる。
+ *
+ * 配り方（SSE）は interfaces 側の関心なので、ここには出てこない（→ D-38 の 1）。
+ */
+export function subscribeAvatarEvents(
+  deps: AvatarDependencies,
+  listener: (event: AvatarEvent) => void,
+): () => void {
+  return deps.events.subscribe(listener);
 }

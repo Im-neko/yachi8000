@@ -39,3 +39,60 @@ export async function fetchAvatarConfig(): Promise<AvatarConfig> {
   }
   return (await response.json()) as AvatarConfig;
 }
+
+/**
+ * 発話と会話状態の流れ（F-21, F-22）。**SSE**（→ D-38 の 1）。
+ *
+ * WebSocket ではないのは Flue の起動経路が Node の http サーバを返さないため。
+ * 一方向で足りるので、再接続が付いてくる `EventSource` のほうが噛み合う。
+ */
+export const AVATAR_EVENTS_URL = '/api/v1/avatar/events';
+
+/** 会話の状態。`listening` は音声入力（フェーズ 7）が入るまで来ない。 */
+export type AvatarState = 'idle' | 'thinking' | 'speaking';
+
+/** 口形。`sil` は「口を閉じる」。 */
+export type Viseme = 'aa' | 'ih' | 'ou' | 'ee' | 'oh' | 'sil';
+
+export interface VisemeFrame {
+  /** 発話の先頭からの秒数。 */
+  at: number;
+  viseme: Viseme;
+}
+
+export interface VisemeTimeline {
+  frames: VisemeFrame[];
+  duration: number;
+}
+
+export type AvatarEvent =
+  | { kind: 'state'; state: AvatarState }
+  | { kind: 'speech'; lipSync: VisemeTimeline };
+
+/**
+ * イベントを購読する。戻り値を呼ぶとやめる。
+ *
+ * **再接続は `EventSource` に任せる。** 切れている間に来た発話は落ちるが、
+ * 過ぎた口を後から動かしても意味がないので取りに行かない。
+ */
+export function subscribeAvatarEvents(
+  onEvent: (event: AvatarEvent) => void,
+  onConnectionChange?: (connected: boolean) => void,
+): () => void {
+  const source = new EventSource(AVATAR_EVENTS_URL);
+
+  const handle = (raw: MessageEvent<string>) => {
+    try {
+      onEvent(JSON.parse(raw.data) as AvatarEvent);
+    } catch {
+      // 壊れた 1 通で購読ごと落とさない。次のイベントは普通に届く。
+    }
+  };
+
+  source.addEventListener('state', handle);
+  source.addEventListener('speech', handle);
+  source.addEventListener('open', () => onConnectionChange?.(true));
+  source.addEventListener('error', () => onConnectionChange?.(false));
+
+  return () => source.close();
+}

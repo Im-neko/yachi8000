@@ -1,3 +1,5 @@
+import type { VisemeTimeline } from '../domain/lipsync.ts';
+import type { AvatarEventPublisher } from '../domain/ports/avatar-event-publisher.ts';
 import type { SpeechSynthesizer } from '../domain/ports/speech-synthesizer.ts';
 import type { VoiceOutput } from '../domain/ports/voice-output.ts';
 import {
@@ -19,6 +21,10 @@ const QUEUE_CAPACITY = 200;
 export interface SpeechDependencies {
   synthesizer: SpeechSynthesizer;
   voice: VoiceOutput;
+  /** アバターへ流す口（F-21, F-22）。**投げっぱなしで、待たない。** */
+  avatar: AvatarEventPublisher;
+  /** 「話している」の出どころ（F-22）。読み上げの区間と一致させる。 */
+  presence: { beginSpeaking(): () => void };
   /** 破棄・失敗を表に出すためのログ。握りつぶさない。 */
   log: {
     warn(context: Record<string, unknown>, message: string): void;
@@ -55,26 +61,30 @@ export function createSpeechService(deps: SpeechDependencies): SpeechService {
   const queue = createSpeechQueue(QUEUE_CAPACITY);
   let draining = false;
 
-  /** 先読み。取り出す文が変わったら捨てる（通知に割り込まれた場合）。 */
-  let prefetch:
-    | { sentence: QueuedSentence; pcm: Promise<Uint8Array> }
-    | undefined;
-
-  function synthesize(sentence: QueuedSentence): Promise<Uint8Array> {
-    return deps.synthesizer
-      .synthesize(sentence.text)
-      .then((speech) => speech.pcm);
+  /** 合成の成果物。音と口形は**同じ合成から**来る（→ D-38 の 2）。 */
+  interface Synthesized {
+    pcm: Uint8Array;
+    lipSync: VisemeTimeline;
   }
 
-  function takePcm(sentence: QueuedSentence): Promise<Uint8Array> {
+  /** 先読み。取り出す文が変わったら捨てる（通知に割り込まれた場合）。 */
+  let prefetch:
+    | { sentence: QueuedSentence; speech: Promise<Synthesized> }
+    | undefined;
+
+  function synthesize(sentence: QueuedSentence): Promise<Synthesized> {
+    return deps.synthesizer.synthesize(sentence.text);
+  }
+
+  function takeSpeech(sentence: QueuedSentence): Promise<Synthesized> {
     if (prefetch && prefetch.sentence === sentence) {
-      const { pcm } = prefetch;
+      const { speech } = prefetch;
       prefetch = undefined;
-      return pcm;
+      return speech;
     }
     // 先読みしていたのは別の文だった（= 割り込まれた）。結果は捨てる。
     if (prefetch) {
-      prefetch.pcm.catch(() => undefined);
+      prefetch.speech.catch(() => undefined);
       prefetch = undefined;
     }
     return synthesize(sentence);
@@ -83,14 +93,15 @@ export function createSpeechService(deps: SpeechDependencies): SpeechService {
   function startPrefetch(): void {
     const next = queue.peek();
     if (!next) return;
-    const pcm = synthesize(next);
-    pcm.catch(() => undefined);
-    prefetch = { sentence: next, pcm };
+    const speech = synthesize(next);
+    speech.catch(() => undefined);
+    prefetch = { sentence: next, speech };
   }
 
   async function drain(): Promise<void> {
     if (draining) return;
     draining = true;
+    const endSpeaking = deps.presence.beginSpeaking();
     try {
       for (let sentence = queue.take(); sentence; sentence = queue.take()) {
         // 再生中に VC から切れたら、残りは読まない。遅れて届く読み上げには
@@ -105,9 +116,12 @@ export function createSpeechService(deps: SpeechDependencies): SpeechService {
         }
 
         try {
-          const pcm = await takePcm(sentence);
+          const speech = await takeSpeech(sentence);
           startPrefetch();
-          await deps.voice.play(pcm);
+          // **音を出す直前に出す**（→ D-38 の 4）。`play()` の内側に
+          // 「鳴り始めた瞬間」を取れる場所は無い。
+          deps.avatar.publish({ kind: 'speech', lipSync: speech.lipSync });
+          await deps.voice.play(speech.pcm);
         } catch (error) {
           // 1 文の失敗で残りを捨てない。落とした事実は必ず出す。
           deps.log.error(
@@ -119,6 +133,7 @@ export function createSpeechService(deps: SpeechDependencies): SpeechService {
     } finally {
       prefetch = undefined;
       draining = false;
+      endSpeaking();
     }
   }
 

@@ -1,5 +1,9 @@
 import type { Client } from 'discord.js';
 import type { AvatarDependencies } from './application/avatar.ts';
+import {
+  type AvatarPresence,
+  createAvatarPresence,
+} from './application/avatar-presence.ts';
 import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
@@ -19,6 +23,7 @@ import type { WebSearchDependencies } from './application/web-search.ts';
 import { env } from './config/env.ts';
 import type { IssueTracker } from './domain/ports/issue-tracker.ts';
 import type { SpeechSynthesizer } from './domain/ports/speech-synthesizer.ts';
+import { createAvatarEventBroadcaster } from './infrastructure/avatar/avatar-event-broadcaster.ts';
 import { createFileModelReader } from './infrastructure/avatar/file-model-reader.ts';
 import { openAppDatabase } from './infrastructure/db/app-database.ts';
 import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
@@ -122,10 +127,23 @@ export const issueDependencies: IssueDependencies = {
   log: logger,
 };
 
+/**
+ * アバターへ流すイベントの配り口（F-21, F-22）。
+ *
+ * **1 つだけ作る。** 出す側（発話キュー・1 ターンの実行）と受け取る側
+ * （SSE のルート）が同じ実体を見ていないと、口が動かないまま声だけ出る。
+ */
+const avatarEvents = createAvatarEventBroadcaster({ log: logger });
+
+/** 会話の状態（F-22）。数えて一番強いものを出す。 */
+export const avatarPresence: AvatarPresence =
+  createAvatarPresence(avatarEvents);
+
 /** アバターの表示（F-20）。VRM は設定ファイルが指す 1 ファイル（→ D-36 の 2）。 */
 export const avatarDependencies: AvatarDependencies = {
   settings,
   models: createFileModelReader(),
+  events: avatarEvents,
   log: logger,
 };
 
@@ -154,7 +172,13 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
     settings,
   });
   const voice = createDiscordVoiceOutput(client);
-  const speech = createSpeechService({ synthesizer, voice, log: logger });
+  const speech = createSpeechService({
+    synthesizer,
+    voice,
+    avatar: avatarEvents,
+    presence: avatarPresence,
+    log: logger,
+  });
   const text = createDiscordTextNotifier(client);
 
   return {

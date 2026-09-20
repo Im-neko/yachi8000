@@ -76,16 +76,31 @@ cd agent && npm run dev     # 5173。API（/api/v1/avatar/*）はこちら
 cd web   && npm run dev     # 5174。ブラウザで開くのはこちら
 ```
 
-確認するのは 2 本:
+確認するのは 3 本:
 
 ```bash
 curl -s http://localhost:5173/api/v1/avatar/config    # 表情とカメラ
 curl -s -o /dev/null -w '%{http_code} %{size_download}\n' \
   http://localhost:5173/api/v1/avatar/model           # VRM 本体
+curl -N  http://localhost:5173/api/v1/avatar/events   # 発話と会話状態（SSE）
 ```
 
 `404` のときは本文が理由を言う。**「設定されていません」と「置かれていません」は別物** ——
 前者は設定ファイルに `avatar` を書く、後者は VRM を置く。
+
+`events` は繋いだ瞬間に今の状態が 1 通流れ、あとは黙る（25 秒ごとに `ping`）。
+読み上げが始まると、**1 文ごとに口形が 1 通**流れる:
+
+```
+event: state
+data: {"kind":"state","state":"speaking"}
+
+event: speech
+data: {"kind":"speech","lipSync":{"frames":[{"at":0,"viseme":"sil"},{"at":0.19,"viseme":"oh"}, ...],"duration":2.96}}
+```
+
+**ここが無音のまま読み上げが進むなら、口は動かない。** 逆にここが流れていて口が
+動かないなら、原因はブラウザ側（`web/src/stage.ts`）にある。
 
 **dev サーバで通っても本番で通るとは限らない。** 本番は agent が `web/dist` を静的に配信する経路で、
 dev サーバの proxy とは別物。最終確認は `cd web && npm run build` した成果物で行う。

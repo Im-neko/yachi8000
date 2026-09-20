@@ -1,15 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { AvatarEvent } from '../domain/avatar-event.ts';
+import type { VisemeTimeline } from '../domain/lipsync.ts';
 import type { VoiceChannelRef } from '../domain/ports/voice-output.ts';
+import { createAvatarPresence } from './avatar-presence.ts';
 import { createSpeechService, type SpeechDependencies } from './speech.ts';
 
 const CHANNEL: VoiceChannelRef = { guildId: 'g', channelId: 'c' };
 
+/** 文ごとに見分けが付く口形列。合成した文と結び付いていることを確かめる用。 */
+function timelineFor(text: string): VisemeTimeline {
+  return {
+    frames: [{ at: 0, viseme: text.startsWith('N') ? 'ih' : 'aa' }],
+    duration: text.length / 10,
+  };
+}
+
 function createHarness() {
   const played: string[] = [];
   const synthesized: string[] = [];
+  const events: AvatarEvent[] = [];
   let connected: VoiceChannelRef | undefined = CHANNEL;
   let pending: { resolve: () => void } | undefined;
   let onPlay: (() => void) | undefined;
+  let failNext = false;
 
   const log = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -17,7 +30,14 @@ function createHarness() {
     synthesizer: {
       synthesize: async (text) => {
         synthesized.push(text);
-        return { pcm: new TextEncoder().encode(text) };
+        if (failNext) {
+          failNext = false;
+          throw new Error('合成に失敗しました');
+        }
+        return {
+          pcm: new TextEncoder().encode(text),
+          lipSync: timelineFor(text),
+        };
       },
       verifyContract: async () => undefined,
     },
@@ -32,6 +52,16 @@ function createHarness() {
           onPlay?.();
         }),
     },
+    avatar: {
+      publish: (event) => {
+        events.push(event);
+      },
+    },
+    presence: createAvatarPresence({
+      publish: (event) => {
+        events.push(event);
+      },
+    }),
     log,
   };
 
@@ -39,9 +69,14 @@ function createHarness() {
     service: createSpeechService(deps),
     played,
     synthesized,
+    events,
     log,
     disconnect() {
       connected = undefined;
+    },
+    /** 次の合成を 1 回だけ失敗させる。 */
+    failNext() {
+      failNext = true;
     },
     /** 次の再生が始まるまで待つ。 */
     waitForPlay(): Promise<void> {
@@ -124,6 +159,54 @@ describe('createSpeechService', () => {
     expect(h.log.warn).toHaveBeenCalledOnce();
     expect(h.played).not.toContain('あふれた。');
     expect(h.service.pending()).toBe(199);
+  });
+
+  // F-21。口形はこの経路からしか出ない（入口ごとに書かない → INV-5）。
+  it('文を再生する直前に、その文の口形を出す', async () => {
+    const h = createHarness();
+
+    h.service.speak({ text: 'A。', priority: 'reply' });
+    await h.waitForPlay();
+
+    expect(h.events).toEqual([
+      { kind: 'state', state: 'speaking' },
+      { kind: 'speech', lipSync: timelineFor('A。') },
+    ]);
+
+    h.finishPlay();
+    await vi.waitFor(() =>
+      expect(h.events.at(-1)).toEqual({ kind: 'state', state: 'idle' }),
+    );
+  });
+
+  it('割り込まれたら、実際に再生する文の口形を出す', async () => {
+    const h = createHarness();
+
+    h.service.speak({ text: 'R1。R2。', priority: 'reply' });
+    await h.waitForPlay();
+    h.service.speak({ text: 'N。', priority: 'notification' });
+    h.finishPlay();
+    await h.waitForPlay();
+
+    const spoken = h.events.filter((event) => event.kind === 'speech');
+    expect(spoken).toEqual([
+      { kind: 'speech', lipSync: timelineFor('R1。') },
+      { kind: 'speech', lipSync: timelineFor('N。') },
+    ]);
+  });
+
+  // 合成に失敗した文で口だけ動く、を防ぐ。
+  it('合成に失敗した文の口形は出さない', async () => {
+    const h = createHarness();
+    h.failNext();
+
+    h.service.speak({ text: 'A。B。', priority: 'reply' });
+    await h.waitForPlay();
+
+    expect(h.played).toEqual(['B。']);
+    expect(h.events.filter((event) => event.kind === 'speech')).toEqual([
+      { kind: 'speech', lipSync: timelineFor('B。') },
+    ]);
   });
 
   it('URL は合成に渡さない（テキスト配信側には残る）', async () => {

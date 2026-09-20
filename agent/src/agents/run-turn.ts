@@ -1,6 +1,6 @@
 import { type DeliveredMessageInput, init } from '@flue/runtime';
 import { ensureSpeakerProfile } from '../application/person.ts';
-import { personDependencies } from '../composition-root.ts';
+import { avatarPresence, personDependencies } from '../composition-root.ts';
 import type { ConversationId } from '../domain/conversation.ts';
 import { parseSpeakerId } from '../domain/speaker.ts';
 import { dispatchSkillCurator } from './dispatch-curator.ts';
@@ -46,16 +46,27 @@ function rememberSpeaker(message: DeliveredMessageInput): void {
  *
  * **返信が確定したらキュレーターを起こす**（F-40）。入口ごとに書くのではなく
  * ここに置くのは、どの入口も同じようにスキルが育ってほしいから。
+ *
+ * **「考えている」の区間もここ**（F-22）。**読み上げと重なる** —— 前の発話が
+ * まだ鳴っている最中に次のターンが始まることがあるので、どちらが強いかは
+ * `avatarPresence` が決める。
  */
 export async function runAgentTurn(
   input: AgentTurnInput,
 ): Promise<string | undefined> {
   rememberSpeaker(input.message);
 
-  const handle = init(Yachi, { id: input.conversationId });
-  const receipt = await handle.dispatch({ message: input.message });
-  const reply = await handle.read(receipt);
-  const text = reply.text.trim();
+  const endThinking = avatarPresence.beginThinking();
+  let text: string;
+  try {
+    const handle = init(Yachi, { id: input.conversationId });
+    const receipt = await handle.dispatch({ message: input.message });
+    const reply = await handle.read(receipt);
+    text = reply.text.trim();
+  } finally {
+    // 失敗しても必ず戻す。戻し忘れると「考えている」のまま固まる。
+    endThinking();
+  }
   if (text === '') return undefined;
 
   // fire-and-forget。待たないので応答レイテンシには影響しない。
