@@ -783,6 +783,7 @@ three-vrm の `expressionManager` が、モデル固有の blendshape 名（例:
 - **アプリ側の Ingress は 2 本に分ける。** annotation は Ingress 単位でしか効かない。`/` に forward auth を付け、**自前の Bearer 認証を持つ API と死活監視だけ**を別 Ingress で素通しにする。認証済みの呼び出しをログイン画面へ 302 すると、JSON を期待している呼び出し側が壊れる
 - **`X-Forwarded-Host` を `auth-snippet` で渡す公式手順は、このクラスタでは通らない。** ingress-nginx が 2 つ動いていて（GitOps 管理のものと Kubernetes ディストリビューション同梱のもの）、**どちらも class `nginx` の Ingress を admission で検証する。** 後者は snippet を許可していないため、`*-snippet` を含む Ingress は拒否される。ConfigMap を指す `auth-proxy-set-headers` に替えた（値は nginx の設定へそのまま書き出されるので変数が使える）。**認証のサブリクエストでは `Host` が `auth-url` のホストに差し替わる**ため、この転送自体は省けない
 - **順序を間違えた。** アバターをデプロイした時点（2026-09-20）で ingress は `/` を素通しで公開しており、**ビューアのページと `/api/v1/avatar/*` が認証なしでインターネットから見える状態が数時間続いた。** D-37 で「forward auth が前提」と書いておきながら、既存の ingress を確認せずにイメージを上げたため。**公開経路を持つアプリでは、機能より先に ingress を見る**
+- **利用者を示すヘッダが信用できるのは、forward auth をかけた Ingress の下だけ**（→ F-05）。生成された nginx の設定を読んで確かめた: `/` の location には `auth_request_set $authHeaderN $upstream_http_x_authentik_*;` と `proxy_set_header 'X-authentik-*' $authHeaderN;` が並び、**client が付けてきた同名のヘッダは必ず上書きされる**。一方、**素通しにした path の location にはこの行が無い** —— そちらへ偽装ヘッダを付ければアプリまでそのまま届く。**`SpeakerId` をこのヘッダから作るなら、対象を forward auth の下の経路に限ること**
 
 
 ### D-38. 発話イベントは SSE で配る。リップシンクの長さは `speedScale` で割る（Q-07 の決着）
