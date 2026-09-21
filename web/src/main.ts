@@ -49,6 +49,17 @@ sound.addEventListener('click', () => {
     });
 });
 
+/** 素材の出どころ（→ D-42 の 2）。設定に無ければ何も出さない。 */
+function showAttribution(text: string | undefined): void {
+  const existing = document.querySelector('#attribution');
+  existing?.remove();
+  if (!text) return;
+  const element = document.createElement('p');
+  element.id = 'attribution';
+  element.textContent = text;
+  document.body.appendChild(element);
+}
+
 const stage = createStage(canvas);
 
 /**
@@ -69,6 +80,10 @@ function reconnect(withAudio: boolean): void {
       }
       if (event.kind === 'expression') {
         stage.setExpression(event.expression, event.weight);
+        return;
+      }
+      if (event.kind === 'gesture') {
+        stage.playGesture(event.gesture);
         return;
       }
       // **音を鳴らせたなら、その再生位置で口を引く**（→ D-39 の 2）。
@@ -98,6 +113,10 @@ try {
   const config = await fetchAvatarConfig();
   await stage.load(AVATAR_MODEL_URL, config);
   show('');
+  // **素材の出どころを出す。** 身振りのモーションには「クレジットを表記
+  // すること」を条件にするライセンスがある（→ D-42 の 2）。設定に書かれて
+  // いれば必ず画面に出す —— 出し忘れがライセンス違反になる類のもの。
+  showAttribution(config.attribution);
 
   /**
    * 発話と会話状態を受け取る（F-21, F-22）。**モデルが映ってから繋ぐ** ——

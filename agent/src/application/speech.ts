@@ -19,7 +19,7 @@ import {
   createSpeechQueue,
   type QueuedSentence,
 } from '../domain/speech-queue.ts';
-import type { ExpressionService } from './expression.ts';
+import type { ReactionService } from './reaction.ts';
 
 /**
  * 溜められる文の上限（Q-06）。1 文あたり数秒なので、200 文で 10 分前後。
@@ -47,7 +47,7 @@ export interface SpeechDependencies {
    * 発話に表情を付ける口（F-24）。**任意** —— 判断を頼む先（Jev）の鍵が
    * 無い環境では素の顔のまま動く。表情は会話を止める理由にならない。
    */
-  expression?: ExpressionService;
+  expression?: ReactionService;
   /** ブラウザが取りに来るまで音を置いておく場所（F-23）。 */
   audio: SpeechAudioStore;
   /** 「話している」の出どころ（F-22）。読み上げの区間と一致させる。 */

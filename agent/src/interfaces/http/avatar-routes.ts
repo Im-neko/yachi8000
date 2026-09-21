@@ -2,6 +2,7 @@ import type { ChannelRouteDefinition } from '@flue/runtime';
 import { streamSSE } from 'hono/streaming';
 import {
   type AvatarDependencies,
+  avatarGestureMotion,
   avatarModel,
   avatarSpeechAudio,
   avatarView,
@@ -13,6 +14,9 @@ const VRM_CONTENT_TYPE = 'model/gltf-binary';
 
 /** ブラウザで鳴らす音（F-23）。PCM に WAV のヘッダを付けて返す。 */
 const SPEECH_CONTENT_TYPE = 'audio/wav';
+
+/** VRMA の media type。VRM と同じ glTF バイナリ。 */
+const MOTION_CONTENT_TYPE = 'model/gltf-binary';
 
 /**
  * 何も起きていない間に流すコメント行の間隔。
@@ -67,6 +71,34 @@ export function createAvatarRoutes(
     return c.body(result.bytes as unknown as ArrayBuffer, 200, {
       'content-type': VRM_CONTENT_TYPE,
       // 差し替えは人が手で行うので、長く持たせず毎回確かめさせる。
+      'cache-control': 'no-cache',
+    });
+  };
+
+  /**
+   * 身振りの素材（F-25）。**VRM とまったく同じ扱い。**
+   *
+   * **種類はクエリで受けるが、パスは受けない。** 受け取った名前は語彙
+   * （`AVATAR_GESTURES`）に入っているかを先に確かめ、実体の在りかは設定
+   * ファイルからしか引かない（→ D-36 の 2）。
+   *
+   * **パスをクエリで受ける作りにすると、表示のために開けた口がそのまま
+   * ファイルシステムの覗き穴になる。**
+   */
+  const getGestureMotion: ChannelRouteDefinition['handler'] = async (c) => {
+    const result = await avatarGestureMotion(deps, c.req.query('kind') ?? '');
+    if (result.kind === 'not-configured') {
+      return c.json({ error: 'その身振りは設定されていません。' }, 404);
+    }
+    if (result.kind === 'missing') {
+      return c.json(
+        { error: '設定されたモーションファイルが置かれていません。' },
+        404,
+      );
+    }
+    return c.body(result.bytes as unknown as ArrayBuffer, 200, {
+      'content-type': MOTION_CONTENT_TYPE,
+      // 差し替えは人が手で行う。VRM と同じ扱いにしておく。
       'cache-control': 'no-cache',
     });
   };
@@ -154,6 +186,7 @@ export function createAvatarRoutes(
   return [
     { method: 'GET', path: '/avatar/config', handler: getConfig },
     { method: 'GET', path: '/avatar/model', handler: getModel },
+    { method: 'GET', path: '/avatar/gesture', handler: getGestureMotion },
     { method: 'GET', path: '/avatar/events', handler: getEvents },
     { method: 'GET', path: '/avatar/speech', handler: getSpeechAudio },
   ];

@@ -6,60 +6,79 @@ import {
   MIN_HOLD_MS,
 } from '../domain/expression.ts';
 import {
-  createExpressionService,
-  type ExpressionService,
-} from './expression.ts';
+  type AvatarGesture,
+  MIN_GESTURE_CONFIDENCE,
+  MIN_GESTURE_INTERVAL_MS,
+} from '../domain/gesture.ts';
+import type { ReactionJudgement } from '../domain/ports/reaction-classifier.ts';
+import { createReactionService, type ReactionService } from './reaction.ts';
 
-const HAPPY: ExpressionJudgement = {
+const HAPPY_FACE: ExpressionJudgement = {
   expression: 'happy',
   confidence: 0.9,
   intensity: 2,
   intensityConfidence: 0.9,
 };
 
-const SAD: ExpressionJudgement = { ...HAPPY, expression: 'sad' };
+/** 身振り無し。**大半の発話はこれ**（→ D-42 の 3）。 */
+const NO_GESTURE = { label: 'none', confidence: 0.9 };
+
+const HAPPY: ReactionJudgement = {
+  expression: HAPPY_FACE,
+  gesture: NO_GESTURE,
+};
+
+const SAD: ReactionJudgement = {
+  expression: { ...HAPPY_FACE, expression: 'sad' },
+  gesture: NO_GESTURE,
+};
 
 interface Harness {
-  service: ExpressionService;
+  service: ReactionService;
   published: AvatarEvent[];
   warnings: string[];
   asked: string[];
   watching: number;
   now: number;
   /** 次に返す判断。`Error` を入れると投げる。 */
-  answer: ExpressionJudgement | Error;
+  answer: ReactionJudgement | Error;
+  /** 素材が置いてある身振り。 */
+  available: AvatarGesture[];
   /** 投げた判断が届くまで待つ（fire-and-forget なので明示的に流す）。 */
   settle(): Promise<void>;
 }
 
 function createHarness(): Harness {
   const harness: Harness = {
-    service: undefined as unknown as ExpressionService,
+    service: undefined as unknown as ReactionService,
     published: [],
     warnings: [],
     asked: [],
     watching: 1,
     now: 10_000,
     answer: HAPPY,
+    available: ['nod', 'wave'],
     settle: async () => {
       await Promise.resolve();
       await Promise.resolve();
     },
   };
 
-  harness.service = createExpressionService({
+  harness.service = createReactionService({
     classifier: {
-      classify: async (text) => {
+      classify: async (text: string) => {
         harness.asked.push(text);
         if (harness.answer instanceof Error) throw harness.answer;
         return harness.answer;
       },
     },
-    avatar: { publish: (event) => harness.published.push(event) },
+    avatar: { publish: (event: AvatarEvent) => harness.published.push(event) },
     watching: () => harness.watching,
+    availableGestures: () => harness.available,
     now: () => harness.now,
     log: {
-      warn: (_context, message) => harness.warnings.push(message),
+      warn: (_context: Record<string, unknown>, message: string) =>
+        harness.warnings.push(message),
       debug: () => undefined,
     },
   });
@@ -67,7 +86,7 @@ function createHarness(): Harness {
   return harness;
 }
 
-describe('createExpressionService', () => {
+describe('createReactionService', () => {
   let h: Harness;
   beforeEach(() => {
     h = createHarness();
@@ -153,5 +172,60 @@ describe('createExpressionService', () => {
     await h.settle();
 
     expect(h.published).toEqual([]);
+  });
+});
+
+describe('createReactionService（身振り）', () => {
+  let h: Harness;
+  beforeEach(() => {
+    h = createHarness();
+  });
+
+  function judgeGesture(label: string, confidence: number): ReactionJudgement {
+    return { expression: HAPPY_FACE, gesture: { label, confidence } };
+  }
+
+  it('確信のある身振りを流す', async () => {
+    h.answer = judgeGesture('nod', 0.9);
+    h.service.forUtterance('そうですね。');
+    await h.settle();
+
+    expect(h.published).toContainEqual({ kind: 'gesture', gesture: 'nod' });
+  });
+
+  // 身振りの外れは目に刺さる（→ D-42 の 3）。迷ったら出さない。
+  it('確信度が足りなければ出さない', async () => {
+    h.answer = judgeGesture('nod', MIN_GESTURE_CONFIDENCE - 0.01);
+    h.service.forUtterance('そうですね。');
+    await h.settle();
+
+    expect(h.published.some((e) => e.kind === 'gesture')).toBe(false);
+  });
+
+  // 出せないものを流すと、ブラウザ側で無音のまま失敗する。
+  it('素材が置かれていない身振りは流さない', async () => {
+    h.answer = judgeGesture('bow', 1);
+    h.service.forUtterance('すみません。');
+    await h.settle();
+
+    expect(h.published.some((e) => e.kind === 'gesture')).toBe(false);
+  });
+
+  it('続けざまには出さない', async () => {
+    h.answer = judgeGesture('nod', 0.9);
+    h.service.forUtterance('そうですね。');
+    await h.settle();
+
+    h.now += MIN_GESTURE_INTERVAL_MS - 1;
+    h.service.forUtterance('はい。');
+    await h.settle();
+
+    expect(h.published.filter((e) => e.kind === 'gesture')).toHaveLength(1);
+
+    h.now += 2;
+    h.service.forUtterance('はい。');
+    await h.settle();
+
+    expect(h.published.filter((e) => e.kind === 'gesture')).toHaveLength(2);
   });
 });

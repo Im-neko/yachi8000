@@ -2,6 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 import { AVATAR_EXPRESSIONS } from '../../domain/avatar.ts';
+import { AVATAR_GESTURES } from '../../domain/gesture.ts';
 import type { SettingsProvider } from '../../domain/ports/settings-provider.ts';
 import type { Settings } from '../../domain/settings.ts';
 import { logger } from '../../observability/logger.ts';
@@ -30,6 +31,18 @@ const SettingsSchema = v.object({
         targetHeight: v.pipe(v.number(), v.minValue(0), v.maxValue(5)),
         distance: v.pipe(v.number(), v.minValue(0.1), v.maxValue(20)),
       }),
+      // 身振りも種類は固定（→ D-42 の 1）。知らない名前は設定の時点で落とす
+      // —— 置いたつもりで一生出ない素材が生まれるのを防ぐ。
+      gestures: v.optional(
+        v.partial(
+          v.object(
+            Object.fromEntries(
+              AVATAR_GESTURES.map((gesture) => [gesture, NonEmpty]),
+            ) as Record<(typeof AVATAR_GESTURES)[number], typeof NonEmpty>,
+          ),
+        ),
+      ),
+      attribution: v.optional(NonEmpty),
     }),
   ),
   voice: v.object({

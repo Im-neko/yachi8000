@@ -1,4 +1,5 @@
 import type { AvatarExpression } from './avatar.ts';
+import type { AvatarGesture } from './gesture.ts';
 import type { PersonaProfile } from './persona.ts';
 
 /**
@@ -35,6 +36,16 @@ export interface Settings {
       /** 注視点からの距離（m）。 */
       distance: number;
     };
+    /**
+     * 身振りの素材（F-25）。**種類ごとに VRMA ファイルのパス**を置く。
+     * VRM と同じ PVC に手で置き、**書いた種類だけが出る**（→ D-42 の 2）。
+     */
+    gestures?: Partial<Record<AvatarGesture, string>>;
+    /**
+     * 素材の出どころ表記。**クレジットを求めるライセンスの素材がある**
+     * ため、画面に出せるようにしてある（→ D-42 の 2）。
+     */
+    attribution?: string;
   };
   notification: {
     /**

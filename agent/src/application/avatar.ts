@@ -1,9 +1,11 @@
 import {
   type AvatarView,
+  avatarGesturePathOf,
   avatarModelPathOf,
   avatarViewOf,
 } from '../domain/avatar.ts';
 import type { AvatarEvent } from '../domain/avatar-event.ts';
+import { AVATAR_GESTURES, type AvatarGesture } from '../domain/gesture.ts';
 import type {
   AvatarEventSource,
   SubscribeOptions,
@@ -36,6 +38,35 @@ export type AvatarModelResult =
   | { kind: 'ok'; bytes: Uint8Array }
   | { kind: 'not-configured' }
   | { kind: 'missing' };
+
+/**
+ * 身振りの素材を読む（F-25）。**VRM とまったく同じ扱い** —— 読むのは
+ * 設定ファイルが指すファイルだけで、リクエストからパスを受け取らない
+ * （→ D-36 の 2、D-42 の 2）。
+ */
+export async function avatarGestureMotion(
+  deps: AvatarDependencies,
+  kind: string,
+): Promise<AvatarModelResult> {
+  if (!isAvatarGesture(kind)) return { kind: 'not-configured' };
+
+  const path = avatarGesturePathOf(deps.settings.get(), kind);
+  if (path === undefined) return { kind: 'not-configured' };
+
+  const bytes = await deps.models.read(path);
+  if (bytes === undefined) {
+    deps.log.warn(
+      { gesture: kind, path },
+      'The configured motion file is not there',
+    );
+    return { kind: 'missing' };
+  }
+  return { kind: 'ok', bytes };
+}
+
+function isAvatarGesture(value: string): value is AvatarGesture {
+  return (AVATAR_GESTURES as readonly string[]).includes(value);
+}
 
 /** ブラウザへ渡す表示設定（F-20）。設定が無ければ undefined。 */
 export function avatarView(deps: AvatarDependencies): AvatarView | undefined {

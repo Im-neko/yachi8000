@@ -4,15 +4,15 @@ import {
   type AvatarPresence,
   createAvatarPresence,
 } from './application/avatar-presence.ts';
-import {
-  createExpressionService,
-  type ExpressionService,
-} from './application/expression.ts';
 import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
 import type { PersonDependencies } from './application/person.ts';
 import type { PersonaDependencies } from './application/persona.ts';
+import {
+  createReactionService,
+  type ReactionService,
+} from './application/reaction.ts';
 import type {
   ReminderDeliveryDependencies,
   ReminderDependencies,
@@ -25,6 +25,7 @@ import {
 import type { VoiceSessionDependencies } from './application/voice-session.ts';
 import type { WebSearchDependencies } from './application/web-search.ts';
 import { env } from './config/env.ts';
+import { configuredGestures } from './domain/avatar.ts';
 import type { IssueTracker } from './domain/ports/issue-tracker.ts';
 import type { SpeechSynthesizer } from './domain/ports/speech-synthesizer.ts';
 import { createAvatarEventBroadcaster } from './infrastructure/avatar/avatar-event-broadcaster.ts';
@@ -34,7 +35,6 @@ import { openAppDatabase } from './infrastructure/db/app-database.ts';
 import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
 import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.ts';
-import { createJevExpressionClassifier } from './infrastructure/expression/jev-classifier.ts';
 import { createGithubIssueTracker } from './infrastructure/github/github-issue-tracker.ts';
 import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
@@ -42,6 +42,7 @@ import { createReminderPhraser } from './infrastructure/llm/reminder-phraser.ts'
 import { createPgvectorMemoryStore } from './infrastructure/memory/pgvector-memory-store.ts';
 import { createSqlitePersonProfileStore } from './infrastructure/person/sqlite-person-profile-store.ts';
 import { createSqlitePersonaDiffStore } from './infrastructure/persona/sqlite-persona-diff-store.ts';
+import { createJevReactionClassifier } from './infrastructure/reaction/jev-reaction-classifier.ts';
 import { createSqliteReminderStore } from './infrastructure/reminder/sqlite-reminder-store.ts';
 import { createBraveSearcher } from './infrastructure/search/brave-search.ts';
 import { createSettingsFileProvider } from './infrastructure/settings/settings-file.ts';
@@ -171,7 +172,7 @@ export const settingsProvider = settings;
  * たびに通る経路なので、投げると毎回 WARN が出てログが埋まる。無効で
  * あることは起動時に 1 行だけ出す（→ D-41 の 6）。
  */
-function createExpressionServiceFromEnv(): ExpressionService | undefined {
+function createReactionServiceFromEnv(): ReactionService | undefined {
   const apiKey = env.JEV_API_KEY;
   if (!apiKey) {
     logger.warn(
@@ -180,12 +181,15 @@ function createExpressionServiceFromEnv(): ExpressionService | undefined {
     );
     return undefined;
   }
-  return createExpressionService({
-    classifier: createJevExpressionClassifier({ apiKey }),
+  return createReactionService({
+    classifier: createJevReactionClassifier({ apiKey }),
     avatar: avatarEvents,
     // **見ている人がいるときだけ頼む。** 消音のタブでも顔は見えるので、
     // 出口の数（`listeningBrowsers`）ではなく購読者の数で数える。
     watching: () => avatarEvents.subscribers(),
+    // 素材が置いてある身振りだけを出す（→ D-42 の 2）。設定ファイルは
+    // 動いている間に書き換わりうるので、**毎回読み直す。**
+    availableGestures: () => configuredGestures(settings.get()),
     now: () => Date.now(),
     log: logger,
   });
@@ -226,7 +230,7 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     avatar: avatarEvents,
-    expression: createExpressionServiceFromEnv(),
+    expression: createReactionServiceFromEnv(),
     audio: speechAudio,
     presence: avatarPresence,
     log: logger,
