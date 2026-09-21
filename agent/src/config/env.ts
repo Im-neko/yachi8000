@@ -78,6 +78,15 @@ const EnvSchema = v.object({
   GITHUB_TOKEN: v.optional(v.pipe(v.string(), v.minLength(1))),
 
   /**
+   * 表情の判断（F-24）を頼む先の API キー。**Jev**（TypeSafe System One）。
+   *
+   * **任意。** 無ければアバターは素の顔のままで、起動も会話も止まらない
+   * （→ D-41 の 6）。無効になっていることは起動ログに 1 行出す ——
+   * 発話ごとに WARN を出すと、鍵を入れていない環境でログが埋まる。
+   */
+  JEV_API_KEY: v.optional(v.pipe(v.string(), v.minLength(1))),
+
+  /**
    * 音声合成エンジンのベース URL（D-05）。エンジンは別 Deployment で動き、
    * yachi8000 は接続情報だけを受け取る。話者 ID は設定ファイル側（F-60）。
    */

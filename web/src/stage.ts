@@ -2,7 +2,12 @@ import { type VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import type { AvatarConfig, AvatarState, VisemeTimeline } from './api.ts';
+import type {
+  AvatarConfig,
+  AvatarState,
+  VisemeTimeline,
+  VrmExpressionPreset,
+} from './api.ts';
 
 export interface Stage {
   /** VRM を読み込んで差し替える。前のモデルは破棄する（F-62）。 */
@@ -19,6 +24,13 @@ export interface Stage {
   speak(lipSync: VisemeTimeline, elapsed?: () => number): void;
   /** 会話の状態を反映する（F-22）。 */
   setState(state: AvatarState): void;
+  /**
+   * 顔に出す感情を差し替える（F-24）。`weight` が 0 なら素の顔へ戻す。
+   *
+   * **いつ戻すかはサーバが決める**（発話が終わると 0 が来る）。ここで
+   * 状態の変化に合わせて勝手に消すと、同じ規則が 2 か所に散る。
+   */
+  setExpression(expression: VrmExpressionPreset, weight: number): void;
   dispose(): void;
 }
 
@@ -33,7 +45,18 @@ export interface Stage {
  * 20fps で見た目の速さが変わる（重い機械ほど口が速く切り替わる、という
  * 逆立ちした挙動になる）。
  */
-const EXPRESSION_ATTACK_SECONDS = 0.03;
+const VISEME_ATTACK_SECONDS = 0.03;
+
+/**
+ * 感情が目標値へ寄る時定数（秒）。
+ *
+ * **口形と同じ速さで動かさない。** 0.03 秒で表情が変わると、顔が切り替わる
+ * というより**差し替わる**。人の表情はそこまで速くないので、目に付く。
+ */
+const EMOTION_ATTACK_SECONDS = 0.25;
+
+/** 口形（F-21）。感情とは別の層で、寄る速さも別（上の 2 つ）。 */
+const VISEMES: ReadonlySet<string> = new Set(['aa', 'ih', 'ou', 'ee', 'oh']);
 
 /**
  * three.js の土台（F-20）。
@@ -63,6 +86,11 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   let current: VRM | undefined;
   let idleExpression: AvatarConfig['idleExpression'] = 'neutral';
   let state: AvatarState = 'idle';
+  /** 今の感情（F-24）。`weight` が 0 なら出していない。 */
+  let emotion: { expression: VrmExpressionPreset; weight: number } = {
+    expression: 'neutral',
+    weight: 0,
+  };
   /** 再生中の口形と、その先頭からの秒数を返す時計。 */
   let lipSync: { timeline: VisemeTimeline; elapsed: () => number } | undefined;
   /** 今の重み。目標へ向かって毎フレーム寄せる。 */
@@ -107,17 +135,23 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   }
 
   /**
-   * 目標の表情。会話の状態（F-22）と口形（F-21）を重ねる。
+   * 目標の表情。会話の状態（F-22）・感情（F-24）・口形（F-21）を重ねる。
    *
    * **話している間は待機の表情を薄める。** 待機の表情（`happy` など）は口も
    * 作るので、そのままだと口形と引っ張り合って、どちらも半端になる。
+   *
+   * **感情が出ている間は待機の表情を出さない。** どちらも同じプリセットの
+   * 層にいるので、足すと混ざって別の顔になる（`happy` + `sad` は困った顔
+   * ではなく、ただの崩れた顔）。**置き換える**のが正しい重ね方で、
+   * 口形だけが常に上に乗る（→ D-41 の 2）。
    */
   function targetExpressions(): Map<string, number> {
     const target = new Map<string, number>();
     const add = (name: string, weight: number) =>
       target.set(name, Math.min(1, (target.get(name) ?? 0) + weight));
 
-    if (state === 'speaking') add(idleExpression, 0.4);
+    if (emotion.weight > 0) add(emotion.expression, emotion.weight);
+    else if (state === 'speaking') add(idleExpression, 0.4);
     else if (state === 'thinking') {
       add(idleExpression, 0.3);
       add('relaxed', 0.6);
@@ -139,8 +173,15 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       if (!target.has(name)) target.set(name, 0);
     }
 
-    const rate = 1 - Math.exp(-delta / EXPRESSION_ATTACK_SECONDS);
     for (const [name, goal] of target) {
+      const rate =
+        1 -
+        Math.exp(
+          -delta /
+            (VISEMES.has(name)
+              ? VISEME_ATTACK_SECONDS
+              : EMOTION_ATTACK_SECONDS),
+        );
       const value =
         (weights.get(name) ?? 0) + (goal - (weights.get(name) ?? 0)) * rate;
       if (goal === 0 && value < 0.01) weights.delete(name);
@@ -202,6 +243,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       idleExpression = config.idleExpression;
       weights.clear();
       lipSync = undefined;
+      emotion = { expression: 'neutral', weight: 0 };
 
       const { targetHeight, distance } = config.camera;
       controls.target.set(0, targetHeight, 0);
@@ -224,6 +266,10 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       };
     },
 
+    setExpression(expression, weight) {
+      emotion = { expression, weight };
+    },
+
     setState(next) {
       state = next;
       // 話し終わったら口を閉じる。イベントが落ちて開きっぱなしになるより、
@@ -234,6 +280,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     dispose() {
       running = false;
       lipSync = undefined;
+      emotion = { expression: 'neutral', weight: 0 };
       timer.dispose();
       observer.disconnect();
       controls.dispose();

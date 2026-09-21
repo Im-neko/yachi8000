@@ -63,8 +63,12 @@ function reconnect(withAudio: boolean): void {
   unsubscribe?.();
   unsubscribe = subscribeAvatarEvents(
     (event) => {
-      if (event.kind !== 'speech') {
+      if (event.kind === 'state') {
         stage.setState(event.state);
+        return;
+      }
+      if (event.kind === 'expression') {
+        stage.setExpression(event.expression, event.weight);
         return;
       }
       // **音を鳴らせたなら、その再生位置で口を引く**（→ D-39 の 2）。

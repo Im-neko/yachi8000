@@ -31,6 +31,9 @@ function createHarness() {
   let failNext = false;
 
   const log = { warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  /** 表情へ渡った文面と、素の顔へ戻した回数（F-24）。 */
+  const utterances: string[] = [];
+  let relaxed = 0;
 
   const deps: SpeechDependencies = {
     synthesizer: {
@@ -72,6 +75,12 @@ function createHarness() {
         events.push(event);
       },
     },
+    expression: {
+      forUtterance: (text) => utterances.push(text),
+      relax: () => {
+        relaxed++;
+      },
+    },
     audio: {
       // 預けた音を ID から引けるようにして、口形と同じ文の音かを確かめる。
       put: (pcm) => {
@@ -97,6 +106,8 @@ function createHarness() {
     stored,
     log,
     slept,
+    utterances,
+    relaxedCount: () => relaxed,
     disconnect() {
       connected = undefined;
     },
@@ -166,6 +177,32 @@ describe('createSpeechService', () => {
 
     expect(h.played).toEqual(['A。', 'B。']);
     expect(h.synthesized).toEqual(['A。', 'B。']);
+  });
+
+  // F-24 / D-41 の 1。文ごとに判断させると顔がぱたぱた変わる。
+  it('表情は発話 1 つにつき 1 回、読み上げる文面で頼む', async () => {
+    const h = createHarness();
+
+    h.service.speak({
+      text: 'A。B。 https://example.com/x',
+      priority: 'reply',
+      origin: ORIGIN,
+    });
+
+    // 声にしない URL は判断の材料にもしない（読み上げる文面をそのまま渡す）。
+    expect(h.utterances).toEqual(['A。B。リンク']);
+  });
+
+  // D-41 の 3。戻さないと最後の発話の顔が待機中ずっと残る。
+  it('読み終わったら素の顔へ戻す', async () => {
+    const h = createHarness();
+
+    h.service.speak({ text: 'A。', priority: 'reply', origin: ORIGIN });
+    await h.waitForPlay();
+    expect(h.relaxedCount()).toBe(0);
+
+    h.finishPlay();
+    await vi.waitFor(() => expect(h.relaxedCount()).toBe(1));
   });
 
   it('再生中に出口が全部いなくなったら、残りを捨てて WARN を出す', async () => {

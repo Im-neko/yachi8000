@@ -4,6 +4,10 @@ import {
   type AvatarPresence,
   createAvatarPresence,
 } from './application/avatar-presence.ts';
+import {
+  createExpressionService,
+  type ExpressionService,
+} from './application/expression.ts';
 import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
@@ -30,6 +34,7 @@ import { openAppDatabase } from './infrastructure/db/app-database.ts';
 import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
 import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.ts';
+import { createJevExpressionClassifier } from './infrastructure/expression/jev-classifier.ts';
 import { createGithubIssueTracker } from './infrastructure/github/github-issue-tracker.ts';
 import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
@@ -159,6 +164,33 @@ export const avatarDependencies: AvatarDependencies = {
 /** 設定ファイルの現在値。表示整形（Discord 側）からも読む。 */
 export const settingsProvider = settings;
 
+/**
+ * 発話に表情を付ける（F-24）。**鍵が無ければ作らない。**
+ *
+ * 起票（`GITHUB_TOKEN`）と違って呼ばれた時点で投げない —— 表情は発話の
+ * たびに通る経路なので、投げると毎回 WARN が出てログが埋まる。無効で
+ * あることは起動時に 1 行だけ出す（→ D-41 の 6）。
+ */
+function createExpressionServiceFromEnv(): ExpressionService | undefined {
+  const apiKey = env.JEV_API_KEY;
+  if (!apiKey) {
+    logger.warn(
+      {},
+      'Expression control is disabled — JEV_API_KEY is not set (the avatar keeps a neutral face)',
+    );
+    return undefined;
+  }
+  return createExpressionService({
+    classifier: createJevExpressionClassifier({ apiKey }),
+    avatar: avatarEvents,
+    // **見ている人がいるときだけ頼む。** 消音のタブでも顔は見えるので、
+    // 出口の数（`listeningBrowsers`）ではなく購読者の数で数える。
+    watching: () => avatarEvents.subscribers(),
+    now: () => Date.now(),
+    log: logger,
+  });
+}
+
 export interface VoiceRuntime {
   synthesizer: SpeechSynthesizer;
   speech: SpeechService;
@@ -194,6 +226,7 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     avatar: avatarEvents,
+    expression: createExpressionServiceFromEnv(),
     audio: speechAudio,
     presence: avatarPresence,
     log: logger,
