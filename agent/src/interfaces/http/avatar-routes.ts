@@ -93,22 +93,30 @@ export function createAvatarRoutes(
         stream.onAbort(resolve);
       });
 
+      // **`?audio=1` は「このタブは音を鳴らせる」という名乗り**（F-23, D-40）。
+      // 名乗ったタブだけを出口として数える —— 既定は消音なので、つないで
+      // いるだけのタブを数えると通知が無音へ向かって「喋った」ことになる。
+      const audio = c.req.query('audio') === '1';
+
       const unsubscribe = subscribeAvatarEvents(
         deps,
         (event) => {
           // 書き込みは待たない。**遅い購読者のために読み上げを止めない**
           // （port の約束どおり投げっぱなし）。
+          //
+          // **書けなかったらそこで畳む。** 閉じたタブは次の書き込みが
+          // 失敗するまで検知されない。放っておくと、音を鳴らせると名乗った
+          // まま消えたタブが出口として数えられ続け、その間の通知が無音へ
+          // 向かって「喋った」ことになる（→ D-40 の 2）。
           void stream
             .writeSSE({ event: event.kind, data: JSON.stringify(event) })
-            .catch(() => undefined);
+            .catch(() => finish());
         },
-        () => finish(),
+        { audio, onClose: () => finish() },
       );
 
       const keepAlive = setInterval(() => {
-        void stream
-          .writeSSE({ event: 'ping', data: '' })
-          .catch(() => undefined);
+        void stream.writeSSE({ event: 'ping', data: '' }).catch(() => finish());
       }, KEEP_ALIVE_INTERVAL_MS);
 
       try {

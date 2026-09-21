@@ -16,6 +16,7 @@ const CONFIGURED = {
 function createHarness(settings: Settings = CONFIGURED) {
   const subscribers: {
     listener: (event: AvatarEvent) => void;
+    audio: boolean;
     close?: () => void;
   }[] = [];
 
@@ -25,12 +26,17 @@ function createHarness(settings: Settings = CONFIGURED) {
     events: {
       subscribe: (
         listener: (event: AvatarEvent) => void,
-        close?: () => void,
+        options: { audio: boolean; onClose?: () => void },
       ) => {
-        subscribers.push({ listener, close });
+        subscribers.push({
+          listener,
+          audio: options.audio,
+          close: options.onClose,
+        });
         listener({ kind: 'state', state: 'idle' });
         return () => undefined;
       },
+      listeningBrowsers: () => 0,
     },
     audio: { put: () => 'id', get: () => new Uint8Array([1, 2, 3, 4]) },
     log: { warn: vi.fn() },

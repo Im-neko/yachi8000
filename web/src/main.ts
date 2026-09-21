@@ -39,6 +39,10 @@ sound.addEventListener('click', () => {
     .enable()
     .then(() => {
       sound.dataset.enabled = 'true';
+      // **サーバへ名乗り直す**（F-23, D-40）。名乗るまでこのタブは出口として
+      // 数えられない —— 数えてしまうと、VC に誰もいないときの通知が無音へ
+      // 向かって「喋った」ことになる。
+      reconnect(true);
     })
     .catch(() => {
       show('このブラウザでは音を鳴らせませんでした。口だけ動きます。');
@@ -46,6 +50,38 @@ sound.addEventListener('click', () => {
 });
 
 const stage = createStage(canvas);
+
+/**
+ * イベントの購読をつなぎ直す（F-21, F-22, F-23）。
+ *
+ * **音を鳴らせるかどうかはサーバ側の判断に効く**（→ D-40）ので、
+ * 「音を出す」を押したら繋ぎ直して名乗り直す。`EventSource` は URL を
+ * 後から変えられないため、閉じて開き直すのが唯一の手。
+ */
+let unsubscribe: (() => void) | undefined;
+function reconnect(withAudio: boolean): void {
+  unsubscribe?.();
+  unsubscribe = subscribeAvatarEvents(
+    (event) => {
+      if (event.kind !== 'speech') {
+        stage.setState(event.state);
+        return;
+      }
+      // **音を鳴らせたなら、その再生位置で口を引く**（→ D-39 の 2）。
+      // 鳴らせなければ届いた時刻を 0 秒にする（今までと同じ）。
+      audio
+        .play(speechAudioUrl(event.speechId))
+        .then((playback) => stage.speak(event.lipSync, playback?.elapsed))
+        .catch(() => stage.speak(event.lipSync));
+    },
+    {
+      audio: withAudio,
+      onConnectionChange: (connected) => {
+        show(connected ? '' : '発話イベントに繋がっていません（再接続中）。');
+      },
+    },
+  );
+}
 stage.onProgress((ratio) => {
   show(
     ratio === undefined
@@ -66,23 +102,7 @@ try {
    * **繋がらなくてもアバターは映ったまま。** 口が動かないだけで、
    * 「表示できませんでした」にはしない（→ INV-7 の部分縮退）。
    */
-  subscribeAvatarEvents(
-    (event) => {
-      if (event.kind !== 'speech') {
-        stage.setState(event.state);
-        return;
-      }
-      // **音を鳴らせたなら、その再生位置で口を引く**（→ D-39 の 2）。
-      // 鳴らせなければ届いた時刻を 0 秒にする（今までと同じ）。
-      audio
-        .play(speechAudioUrl(event.speechId))
-        .then((playback) => stage.speak(event.lipSync, playback?.elapsed))
-        .catch(() => stage.speak(event.lipSync));
-    },
-    (connected) => {
-      show(connected ? '' : '発話イベントに繋がっていません（再接続中）。');
-    },
-  );
+  reconnect(audio.enabled());
 } catch (error) {
   // 失敗の中身をそのまま出す。「読み込めません」だけだと、モデルが置かれて
   // いないのか設定が間違っているのかが分からない。

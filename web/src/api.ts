@@ -84,11 +84,27 @@ export function speechAudioUrl(speechId: string): string {
  * **再接続は `EventSource` に任せる。** 切れている間に来た発話は落ちるが、
  * 過ぎた口を後から動かしても意味がないので取りに行かない。
  */
+export interface SubscribeOptions {
+  /**
+   * **このタブが音を鳴らせるか**（F-23, D-40）。
+   *
+   * サーバはこれを「出口がひとつある」と数える。既定は消音なので、
+   * 押されていないタブが出口として数えられると、**通知が無音へ向かって
+   * 「喋った」ことになり、テキストへの退避も止まる**。
+   * 「音を出す」を押したら、この値を変えて**つなぎ直す**。
+   */
+  audio: boolean;
+  onConnectionChange?: (connected: boolean) => void;
+}
+
 export function subscribeAvatarEvents(
   onEvent: (event: AvatarEvent) => void,
-  onConnectionChange?: (connected: boolean) => void,
+  options: SubscribeOptions,
 ): () => void {
-  const source = new EventSource(AVATAR_EVENTS_URL);
+  const { audio, onConnectionChange } = options;
+  const source = new EventSource(
+    audio ? `${AVATAR_EVENTS_URL}?audio=1` : AVATAR_EVENTS_URL,
+  );
 
   const handle = (raw: MessageEvent<string>) => {
     try {

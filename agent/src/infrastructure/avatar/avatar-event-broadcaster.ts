@@ -38,6 +38,8 @@ export function createAvatarEventBroadcaster(
   interface Subscriber {
     deliver(event: AvatarEvent): void;
     close?: () => void;
+    /** 音を鳴らせると名乗っているか（→ D-40）。 */
+    audio: boolean;
   }
 
   const listeners = new Set<Subscriber>();
@@ -66,8 +68,12 @@ export function createAvatarEventBroadcaster(
       for (const listener of listeners) emit(listener, event);
     },
 
-    subscribe(listener, onClose) {
-      const subscriber: Subscriber = { deliver: listener, close: onClose };
+    subscribe(listener, options) {
+      const subscriber: Subscriber = {
+        deliver: listener,
+        close: options.onClose,
+        audio: options.audio,
+      };
       listeners.add(subscriber);
       emit(subscriber, state);
       return () => {
@@ -76,6 +82,12 @@ export function createAvatarEventBroadcaster(
     },
 
     subscribers: () => listeners.size,
+
+    listeningBrowsers() {
+      let listening = 0;
+      for (const subscriber of listeners) if (subscriber.audio) listening++;
+      return listening;
+    },
 
     closeAll() {
       for (const subscriber of listeners) {

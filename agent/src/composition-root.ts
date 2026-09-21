@@ -184,6 +184,15 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
   const speech = createSpeechService({
     synthesizer,
     voice,
+    // **つながっている出口**（→ D-40）。Discord VC とブラウザは対等で、
+    // どちらか一方でも聞いていれば読み上げる。ここが内訳を知る唯一の場所。
+    outputs: {
+      current: () => ({
+        voiceGuildId: voice.current()?.guildId,
+        listeningBrowsers: avatarEvents.listeningBrowsers(),
+      }),
+    },
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     avatar: avatarEvents,
     audio: speechAudio,
     presence: avatarPresence,
@@ -203,7 +212,6 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
         settings,
       }),
       speech,
-      voice,
       text,
       settings,
       log: logger,
@@ -217,7 +225,6 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
         settings,
       }),
       speech,
-      voice,
       text,
       log: logger,
     },

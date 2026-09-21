@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Notification } from '../domain/notification.ts';
 import type { Settings } from '../domain/settings.ts';
+import { hasNoTarget, selectSpeechTargets } from '../domain/speech-audience.ts';
 import {
   lastNotificationAcceptedAt,
   type NotifyDependencies,
@@ -25,6 +26,8 @@ function createHarness(options: {
   connected: boolean;
   /** 接続中の VC のサーバ。宛先を指定した通知は同じサーバのときだけ読み上げる。 */
   guildId?: string;
+  /** 音を鳴らせると名乗っているブラウザの数（F-23, D-40）。 */
+  listeningBrowsers?: number;
   rewrite?: (notification: Notification) => Promise<string>;
   send?: () => Promise<void>;
   notification?: Settings['notification'];
@@ -32,7 +35,7 @@ function createHarness(options: {
   const spoken: string[] = [];
   const sent: Array<{ channelId: string; text: string }> = [];
   const settings = {
-    notification: options.notification ?? { whenNotInVoice: 'drop' },
+    notification: options.notification ?? { whenNoOutput: 'drop' },
   } as Settings;
 
   return {
@@ -46,16 +49,18 @@ function createHarness(options: {
         speak: ({ text }) => {
           spoken.push(text);
         },
+        // 出口の選び方は domain の関数そのものを使う。ここで条件を書き写すと、
+        // 規則が 2 箇所になって必ず食い違う。
+        canSpeak: (origin) =>
+          !hasNoTarget(
+            selectSpeechTargets(origin, {
+              voiceGuildId: options.connected
+                ? (options.guildId ?? 'g')
+                : undefined,
+              listeningBrowsers: options.listeningBrowsers ?? 0,
+            }),
+          ),
         pending: () => 0,
-      },
-      voice: {
-        join: async () => undefined,
-        leave: () => false,
-        current: () =>
-          options.connected
-            ? { guildId: options.guildId ?? 'g', channelId: 'c' }
-            : undefined,
-        play: async () => undefined,
       },
       text: {
         send:
@@ -100,7 +105,7 @@ describe('notify', () => {
     const { deps, sent, spoken } = createHarness({
       connected: false,
       rewrite,
-      notification: { whenNotInVoice: 'text', fallbackChannelId: '123' },
+      notification: { whenNoOutput: 'text', fallbackChannelId: '123' },
     });
 
     await expect(notify(deps, NOTIFICATION)).resolves.toBe('delivered-as-text');
@@ -113,7 +118,7 @@ describe('notify', () => {
   it('テキスト配信にも失敗したら破棄し、ERROR を出す', async () => {
     const { deps } = createHarness({
       connected: false,
-      notification: { whenNotInVoice: 'text', fallbackChannelId: '123' },
+      notification: { whenNoOutput: 'text', fallbackChannelId: '123' },
       send: async () => {
         throw new Error('channel is gone');
       },
@@ -188,7 +193,7 @@ describe('notify（宛先を指定した通知）', () => {
   function harness(options: { connected: boolean; guildId?: string }) {
     return createHarness({
       ...options,
-      notification: { whenNotInVoice: 'drop', channels: CHANNELS },
+      notification: { whenNoOutput: 'drop', channels: CHANNELS },
     });
   }
 
@@ -226,7 +231,7 @@ describe('notify（宛先を指定した通知）', () => {
     const { deps, sent, spoken } = createHarness({
       connected: true,
       notification: {
-        whenNotInVoice: 'text',
+        whenNoOutput: 'text',
         fallbackChannelId: '123',
         channels: CHANNELS,
       },
@@ -244,7 +249,7 @@ describe('notify（宛先を指定した通知）', () => {
     const { deps, spoken } = createHarness({
       connected: true,
       guildId: 'g',
-      notification: { whenNotInVoice: 'drop', channels: CHANNELS },
+      notification: { whenNoOutput: 'drop', channels: CHANNELS },
       send: async () => {
         throw new Error('channel is gone');
       },
@@ -258,7 +263,7 @@ describe('notify（宛先を指定した通知）', () => {
   it('読み上げもテキストも届かなければ破棄し、ERROR を出す', async () => {
     const { deps } = createHarness({
       connected: false,
-      notification: { whenNotInVoice: 'drop', channels: CHANNELS },
+      notification: { whenNoOutput: 'drop', channels: CHANNELS },
       send: async () => {
         throw new Error('channel is gone');
       },

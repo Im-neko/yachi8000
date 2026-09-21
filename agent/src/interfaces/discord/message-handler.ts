@@ -2,8 +2,6 @@ import type { DeliveredMessageInput } from '@flue/runtime';
 import { type Client, Events, type Message } from 'discord.js';
 import { runAgentTurn } from '../../agents/run-turn.ts';
 import type { SpeechService } from '../../application/speech.ts';
-import type { VoiceSessionDependencies } from '../../application/voice-session.ts';
-import { currentVoiceChannel } from '../../application/voice-session.ts';
 import { formatJstDate } from '../../domain/issue.ts';
 import { shouldRespond } from '../../domain/response-policy.ts';
 import { logger } from '../../observability/logger.ts';
@@ -12,7 +10,6 @@ import { splitForDiscord } from './outgoing.ts';
 
 export interface MessageHandlerDependencies {
   speech: SpeechService;
-  voice: VoiceSessionDependencies;
 }
 
 /** 本文から Bot 自身へのメンションを落とす。宛先の記号はモデルには不要。 */
@@ -126,11 +123,14 @@ async function handleMessage(
     first = false;
   }
 
-  // 同じサーバの VC にいるときだけ声にする（F-12）。DM や別サーバの
-  // 発言を、繋いでいる VC で読み上げるのは宛先として筋が通らない。
-  if (currentVoiceChannel(deps.voice)?.guildId === message.guildId) {
-    deps.speech.speak({ text: reply, priority: 'reply' });
-  }
+  // **どの出口へ出すかは発話側が決める**（→ D-40）。ここは「どこから来た
+  // 発言か」だけを渡す。同じサーバの VC にいるかどうか（F-12）も、
+  // ブラウザが聞いているかどうか（F-23）も、判定は 1 箇所に置いてある。
+  deps.speech.speak({
+    text: reply,
+    priority: 'reply',
+    origin: { kind: 'conversation', guildId: message.guildId ?? undefined },
+  });
 }
 
 export function registerMessageHandler(

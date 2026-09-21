@@ -50,7 +50,6 @@ await voice.synthesizer.verifyContract();
 
 registerMessageHandler(client, {
   speech: voice.speech,
-  voice: voice.voiceSession,
 });
 await registerSlashCommands(client, {
   voice: voice.voiceSession,
