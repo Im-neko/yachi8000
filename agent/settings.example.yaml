@@ -38,6 +38,19 @@ avatar:
     targetHeight: 1.3
     # 注視点からの距離（m）。小さくすると寄る。
     distance: 1.5
+  # 発話に合わせた身振り（F-25, → D-42）。**任意。書いた種類だけが出る。**
+  # 実体は VRMA ファイルで、VRM と同じ場所に手で置く（リポジトリに入れない）。
+  # 種類は固定で、この 6 つ以外は設定の時点で弾かれる。
+  # gestures:
+  #   nod: ./data/motions/nod.vrma          # 頷く（同意・了解・相槌）
+  #   tilt: ./data/motions/tilt.vrma        # 首をかしげる（疑問・迷い）
+  #   wave: ./data/motions/wave.vrma        # 手を振る（挨拶・呼びかけ）
+  #   bow: ./data/motions/bow.vrma          # お辞儀（謝る・礼を言う）
+  #   shrug: ./data/motions/shrug.vrma      # 肩をすくめる（分からない）
+  #   present: ./data/motions/present.vrma  # 示す（説明・提示）
+  # 素材の出どころ表記。**クレジット表記を条件にするライセンスがある**ので、
+  # そういう素材を使うなら必ず書く（書けば画面の左上に出る → D-42 の 2）。
+  # attribution: "キャラクターアニメーション: ピクシブ株式会社 VRoidプロジェクト"
 
 voice:
   # 音声合成エンジンの話者 ID。エンジンによって中身が違うので、

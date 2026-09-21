@@ -1,6 +1,9 @@
 import * as v from 'valibot';
-import type { ExpressionJudgement } from '../../domain/expression.ts';
-import type { ExpressionClassifier } from '../../domain/ports/expression-classifier.ts';
+import { AVATAR_GESTURES, NO_GESTURE } from '../../domain/gesture.ts';
+import type {
+  ReactionClassifier,
+  ReactionJudgement,
+} from '../../domain/ports/reaction-classifier.ts';
 
 const ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 
@@ -50,7 +53,41 @@ const QUESTIONS = {
     instructions: 'その表情をどれくらい強く顔に出すか',
     criteria: ['ほとんど顔に出さない', 'はっきり分かる程度', '大きく顔に出す'],
   },
+  /**
+   * 身振り（F-25）。**同じリクエストに問いを足すだけ。**
+   *
+   * 入力は使い回しになり、出力は課金対象外なので**料金はほぼ変わらない**。
+   * 応答時間も、複数問を 1 回で評価するモデルなので伸びない。
+   *
+   * **`none` を先頭に置き、説明でも「大半はこれ」と言い切る。** 身振りは
+   * 外れの代償が大きいので、**迷ったら出さない**へ倒したい。
+   */
+  gesture: {
+    type: 'choice',
+    instructions:
+      'この発話に自然に伴う身振りはどれか。大半の発話には身振りは伴わないので、はっきり当てはまるものが無ければ none を選ぶ。',
+    criteria: {
+      [NO_GESTURE]: '特に身振りを伴わない。淡々とした受け答え・説明・報告',
+      nod: '頷く。同意する、了解する、相手の話を受け止める',
+      tilt: '首をかしげる。疑問に思う、迷う、はっきりしない',
+      wave: '手を振る。挨拶、呼びかけ、別れ',
+      bow: 'お辞儀する。謝る、礼を言う',
+      shrug: '肩をすくめる。分からない、どうしようもない',
+      present: '手で示す。説明する、何かを指し示す、提示する',
+    },
+  },
 } as const;
+
+// **語彙のずれを起動時に落とす。** 説明の側だけ足して domain を直し忘れると、
+// 「返ってくるが絶対に出ない身振り」が黙って生まれる。
+const described = Object.keys(QUESTIONS.gesture.criteria);
+for (const gesture of AVATAR_GESTURES) {
+  if (!described.includes(gesture)) {
+    throw new Error(
+      `身振り ${gesture} の説明が Jev への問いにありません（domain/gesture.ts と揃えてください）。`,
+    );
+  }
+}
 
 /**
  * 使う部分だけを検証する。**形が違えば投げる** —— 黙って素の顔に倒すと、
@@ -68,6 +105,10 @@ const JevResponseSchema = v.object({
       score: v.number(),
       confidence: v.number(),
     }),
+    gesture: v.object({
+      choice: v.string(),
+      confidence: v.number(),
+    }),
   }),
 });
 
@@ -79,20 +120,20 @@ export interface CreateJevClassifierInput {
 }
 
 /**
- * Jev（TypeSafe System One）で表情を判断する（→ D-41）。
+ * Jev（TypeSafe System One）で表情と身振りを判断する（→ D-41, D-42）。
  *
  * テキスト生成をせず**型付きの判断だけ**返すモデルなので、
  * 「LLM に副作用を持たせない」（絶対ルール 3）と構造が噛み合う。
  * 1 リクエストで複数の質問を同時に評価でき、`state` は 1 回しか読まれない。
  */
-export function createJevExpressionClassifier(
+export function createJevReactionClassifier(
   input: CreateJevClassifierInput,
-): ExpressionClassifier {
+): ReactionClassifier {
   const endpoint = input.endpoint ?? ENDPOINT;
   const timeoutMs = input.timeoutMs ?? TIMEOUT_MS;
 
   return {
-    async classify(text: string): Promise<ExpressionJudgement> {
+    async classify(text: string): Promise<ReactionJudgement> {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -117,10 +158,16 @@ export function createJevExpressionClassifier(
 
       const body = v.parse(JevResponseSchema, await response.json());
       return {
-        expression: body.answers.expression.choice,
-        confidence: body.answers.expression.confidence,
-        intensity: body.answers.intensity.score,
-        intensityConfidence: body.answers.intensity.confidence,
+        expression: {
+          expression: body.answers.expression.choice,
+          confidence: body.answers.expression.confidence,
+          intensity: body.answers.intensity.score,
+          intensityConfidence: body.answers.intensity.confidence,
+        },
+        gesture: {
+          label: body.answers.gesture.choice,
+          confidence: body.answers.gesture.confidence,
+        },
       };
     },
   };

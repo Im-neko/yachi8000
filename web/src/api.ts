@@ -10,6 +10,21 @@ export const VRM_EXPRESSION_PRESETS = [
 
 export type VrmExpressionPreset = (typeof VRM_EXPRESSION_PRESETS)[number];
 
+/**
+ * 出せる身振り（F-25）。**種類は agent 側の語彙と同じ順・同じ名前。**
+ * 実体（VRMA）は運用者が置いたものだけが配られる。
+ */
+export const AVATAR_GESTURES = [
+  'nod',
+  'tilt',
+  'wave',
+  'bow',
+  'shrug',
+  'present',
+] as const;
+
+export type AvatarGesture = (typeof AVATAR_GESTURES)[number];
+
 export interface AvatarConfig {
   /** 待機時の表情。プリセット名だけが来る（agent 側の設定スキーマで検証済み）。 */
   idleExpression: VrmExpressionPreset;
@@ -19,10 +34,22 @@ export interface AvatarConfig {
     /** 注視点からの距離（m）。 */
     distance: number;
   };
+  /** **素材が置いてある身振りだけ**が入る。空なら身振りは出ない。 */
+  gestures: AvatarGesture[];
+  /** 素材の出どころ表記。**クレジットを求めるライセンスがあるため**（→ D-42 の 2）。 */
+  attribution?: string;
 }
 
 /** VRM 本体。agent が設定ファイルの指す 1 ファイルを返す（→ D-36 の 2）。 */
 export const AVATAR_MODEL_URL = '/api/v1/avatar/model';
+
+/**
+ * 身振りの素材（F-25）。**種類しか渡さない** —— パスを渡せる作りにすると、
+ * 表示のために開けた口がファイルシステムの覗き穴になる（→ D-36 の 2）。
+ */
+export function gestureMotionUrl(gesture: AvatarGesture): string {
+  return `/api/v1/avatar/gesture?kind=${encodeURIComponent(gesture)}`;
+}
 
 /**
  * アバターの表示設定を取る。
@@ -72,7 +99,12 @@ export type AvatarEvent =
    * 顔に出す感情（F-24）。**発話ごとに 1 回**来て、読み終わると
    * `weight: 0`（素の顔）が来る。口形とは別の層で、同時に成り立つ。
    */
-  | { kind: 'expression'; expression: VrmExpressionPreset; weight: number };
+  | { kind: 'expression'; expression: VrmExpressionPreset; weight: number }
+  /**
+   * 身振り（F-25）。**出るときだけ来る**（大半の発話では来ない）。
+   * 1 回再生して待機へ戻す。
+   */
+  | { kind: 'gesture'; gesture: AvatarGesture };
 
 /**
  * 読み上げた音（F-23）。**イベントには ID だけが載る**ので、鳴らすなら
@@ -125,6 +157,7 @@ export function subscribeAvatarEvents(
   source.addEventListener('state', handle);
   source.addEventListener('speech', handle);
   source.addEventListener('expression', handle);
+  source.addEventListener('gesture', handle);
   source.addEventListener('open', () => onConnectionChange?.(true));
   source.addEventListener('error', () => onConnectionChange?.(false));
 

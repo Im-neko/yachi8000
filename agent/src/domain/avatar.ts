@@ -1,3 +1,4 @@
+import { AVATAR_GESTURES, type AvatarGesture } from './gesture.ts';
 import type { Settings } from './settings.ts';
 
 /**
@@ -30,6 +31,16 @@ export interface AvatarView {
     /** 注視点からの距離（m）。 */
     distance: number;
   };
+  /**
+   * 素材が置いてある身振り（F-25）。**置いていない種類は出てこない。**
+   * ブラウザはこの一覧だけを先に読み込む。
+   */
+  gestures: AvatarGesture[];
+  /**
+   * 素材の出どころ表記。**ライセンスがクレジットを求める素材があるため**
+   * （→ D-42 の 2）。設定に書かれていれば画面の隅に出す。
+   */
+  attribution?: string;
 }
 
 /**
@@ -45,7 +56,26 @@ export function avatarViewOf(settings: Settings): AvatarView | undefined {
   return {
     idleExpression: avatar.idleExpression,
     camera: { ...avatar.camera },
+    gestures: configuredGestures(settings),
+    ...(avatar.attribution === undefined
+      ? {}
+      : { attribution: avatar.attribution }),
   };
+}
+
+/** 設定にパスが書かれている身振り。**順番は語彙の定義順に揃える。** */
+export function configuredGestures(settings: Settings): AvatarGesture[] {
+  const configured = settings.avatar?.gestures;
+  if (!configured) return [];
+  return AVATAR_GESTURES.filter((gesture) => configured[gesture] !== undefined);
+}
+
+/** ひとつの身振りの素材の置き場所。設定に無ければ undefined。 */
+export function avatarGesturePathOf(
+  settings: Settings,
+  gesture: AvatarGesture,
+): string | undefined {
+  return settings.avatar?.gestures?.[gesture];
 }
 
 /** VRM 本体の置き場所。設定が無ければ undefined。 */

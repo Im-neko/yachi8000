@@ -68,3 +68,18 @@ body {
 #sound[data-enabled="true"] {
   display: none;
 }
+
+/*
+ * 素材の出どころ（→ D-42 の 2）。**ライセンスがクレジット表記を条件に
+ * する素材がある**ので、控えめだが必ず読める形で出す。読み込み中の表示
+ * （#status）と重ならないよう、左下ではなく左上に置く。
+ */
+#attribution {
+  position: fixed;
+  inset: 1rem auto auto 1rem;
+  margin: 0;
+  color: #ffffff99;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  pointer-events: none;
+}

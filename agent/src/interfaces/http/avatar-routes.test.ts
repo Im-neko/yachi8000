@@ -62,6 +62,8 @@ describe('createAvatarRoutes', () => {
     expect(await response.json()).toEqual({
       idleExpression: 'happy',
       camera: { targetHeight: 1.3, distance: 1.5 },
+      // 素材を置いていなければ空。ブラウザは何も読み込まない（F-25）。
+      gestures: [],
     });
   });
 

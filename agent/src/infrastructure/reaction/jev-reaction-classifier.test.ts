@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createJevExpressionClassifier } from './jev-classifier.ts';
+import { createJevReactionClassifier } from './jev-reaction-classifier.ts';
 
-const classifier = createJevExpressionClassifier({ apiKey: 'test-key' });
+const classifier = createJevReactionClassifier({ apiKey: 'test-key' });
 
 /** 実物が返す形（`legend` と `probabilities` は使わないので省いてある）。 */
 const ANSWER = {
@@ -9,6 +9,7 @@ const ANSWER = {
   answers: {
     expression: { type: 'choice', choice: 'happy', confidence: 0.88 },
     intensity: { type: 'score', score: 1.4, confidence: 0.71 },
+    gesture: { type: 'choice', choice: 'nod', confidence: 0.82 },
   },
   usage: { input_tokens: 644, output_tokens: 89 },
 };
@@ -24,7 +25,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('createJevExpressionClassifier', () => {
+describe('createJevReactionClassifier', () => {
   it('文面を state の 1 項目に入れて投げ、判断を返す', async () => {
     const fetchMock = respondWith(ANSWER);
     vi.stubGlobal('fetch', fetchMock);
@@ -38,10 +39,13 @@ describe('createJevExpressionClassifier', () => {
     // 閾値を実測に合わせているので、モデルは固定で呼ぶ。
     expect(body.model).toBe('jev-1.13.0');
     expect(judgement).toEqual({
-      expression: 'happy',
-      confidence: 0.88,
-      intensity: 1.4,
-      intensityConfidence: 0.71,
+      expression: {
+        expression: 'happy',
+        confidence: 0.88,
+        intensity: 1.4,
+        intensityConfidence: 0.71,
+      },
+      gesture: { label: 'nod', confidence: 0.82 },
     });
   });
 

@@ -1,4 +1,5 @@
 import type { AvatarExpression } from './avatar.ts';
+import type { AvatarGesture } from './gesture.ts';
 import type { VisemeTimeline } from './lipsync.ts';
 
 /**
@@ -53,4 +54,11 @@ export type AvatarEvent =
       readonly kind: 'expression';
       readonly expression: AvatarExpression;
       readonly weight: number;
-    };
+    }
+  /**
+   * 身振り（F-25）。**出るときだけ出る** —— 大半の発話では流れない
+   * （→ D-42 の 3）。受け取ったブラウザは 1 回だけ再生して待機へ戻す。
+   *
+   * **素材を持っていない種類は流さない**（サーバ側で確かめてある）。
+   */
+  | { readonly kind: 'gesture'; readonly gesture: AvatarGesture };

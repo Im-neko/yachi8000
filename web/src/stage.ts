@@ -4,10 +4,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type {
   AvatarConfig,
+  AvatarGesture,
   AvatarState,
   VisemeTimeline,
   VrmExpressionPreset,
 } from './api.ts';
+import { createGesturePlayer } from './gesture.ts';
 import { createIdlePose } from './pose.ts';
 
 export interface Stage {
@@ -32,6 +34,13 @@ export interface Stage {
    * 状態の変化に合わせて勝手に消すと、同じ規則が 2 か所に散る。
    */
   setExpression(expression: VrmExpressionPreset, weight: number): void;
+  /**
+   * 身振りを 1 回再生する（F-25）。**素材が無ければ何も起きない。**
+   *
+   * **出すかどうかを決めるのはサーバ**（→ D-42 の 3）。ここへ来た時点で
+   * 「出す」は決まっているので、条件を二重に持たない。
+   */
+  playGesture(gesture: AvatarGesture): void;
   dispose(): void;
 }
 
@@ -110,6 +119,8 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   const weights = new Map<string, number>();
   /** 待機の姿勢・呼吸・まばたき。**T ポーズのまま立たせないため。** */
   const idle = createIdlePose();
+  /** 身振り（F-25）。素材は読み込みのときにまとめて取りに行く。 */
+  const gestures = createGesturePlayer();
   /** いまのまばたきの重み。毎フレーム進める。 */
   let blink = 0;
   let progressHandler: (ratio: number | undefined) => void = () => undefined;
@@ -220,6 +231,9 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     // **姿勢は VRM の update より先に当てる。** 正規化ボーンへ書いた回転を
     // 実ボーンへ写すのが update の仕事なので、後から書いても 1 フレーム遅れる。
     if (current) idle.update(current, delta);
+    // **身振りは待機の姿勢の後。** 同じボーンを触るので、後から書いたほうが
+    // 勝つ。触っていないボーン（首・腰など）では呼吸がそのまま続く。
+    gestures.update(delta);
     // 揺れもの・表情・視線はすべて VRM 側の update が進める。
     current?.update(delta);
     controls.update();
@@ -264,6 +278,9 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       // **T ポーズのまま立たせない**（→ Q-27）。素材を持ち込まなくても、
       // ボーンを寝かせるだけで待機の見た目は作れる。
       idle.apply(vrm);
+      // **素材の読み込みは待つ。** 待たずに進めると、最初の数発話だけ
+      // 身振りが出ないという分かりにくい挙動になる。
+      await gestures.load(vrm, config.gestures);
       // 見ている人を見る。**カメラはシーンに入れていない**が、描画のたびに
       // three.js が行列を更新するので、そのまま注視点として使える。
       if (vrm.lookAt) vrm.lookAt.target = camera;
@@ -301,6 +318,10 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       emotion = { expression, weight };
     },
 
+    playGesture(gesture) {
+      gestures.play(gesture);
+    },
+
     setState(next) {
       state = next;
       // 話し終わったら口を閉じる。イベントが落ちて開きっぱなしになるより、
@@ -312,6 +333,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       running = false;
       lipSync = undefined;
       emotion = { expression: 'neutral', weight: 0 };
+      gestures.dispose();
       timer.dispose();
       observer.disconnect();
       controls.dispose();
