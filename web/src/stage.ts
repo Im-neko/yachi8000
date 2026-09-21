@@ -8,6 +8,7 @@ import type {
   VisemeTimeline,
   VrmExpressionPreset,
 } from './api.ts';
+import { createIdlePose } from './pose.ts';
 
 export interface Stage {
   /** VRM を読み込んで差し替える。前のモデルは破棄する（F-62）。 */
@@ -55,8 +56,20 @@ const VISEME_ATTACK_SECONDS = 0.03;
  */
 const EMOTION_ATTACK_SECONDS = 0.25;
 
-/** 口形（F-21）。感情とは別の層で、寄る速さも別（上の 2 つ）。 */
-const VISEMES: ReadonlySet<string> = new Set(['aa', 'ih', 'ou', 'ee', 'oh']);
+/**
+ * **速く動かすもの**。口形（F-21）とまばたき。
+ *
+ * 感情（0.25 秒）と同じ速さで動かすと、まばたきは「目をつぶる」になり、
+ * 口は隣のモーラに埋もれる。
+ */
+const FAST_EXPRESSIONS: ReadonlySet<string> = new Set([
+  'aa',
+  'ih',
+  'ou',
+  'ee',
+  'oh',
+  'blink',
+]);
 
 /**
  * three.js の土台（F-20）。
@@ -95,6 +108,10 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
   let lipSync: { timeline: VisemeTimeline; elapsed: () => number } | undefined;
   /** 今の重み。目標へ向かって毎フレーム寄せる。 */
   const weights = new Map<string, number>();
+  /** 待機の姿勢・呼吸・まばたき。**T ポーズのまま立たせないため。** */
+  const idle = createIdlePose();
+  /** いまのまばたきの重み。毎フレーム進める。 */
+  let blink = 0;
   let progressHandler: (ratio: number | undefined) => void = () => undefined;
   // Clock は r183 で非推奨。Timer は Page Visibility API を使えるので、
   // タブが隠れている間に溜まった時間を delta に流し込まない（揺れものが暴れる）。
@@ -159,6 +176,9 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
 
     const viseme = currentViseme();
     if (viseme) add(viseme, 1);
+    // **まばたきは他と足し合わせない層。** 表情が `overrideBlink` を宣言して
+    // いれば、three-vrm 側が勝手に薄めてくれる（笑っている間は目が細いまま）。
+    if (blink > 0) add('blink', blink);
     return target;
   }
 
@@ -178,7 +198,7 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
         1 -
         Math.exp(
           -delta /
-            (VISEMES.has(name)
+            (FAST_EXPRESSIONS.has(name)
               ? VISEME_ATTACK_SECONDS
               : EMOTION_ATTACK_SECONDS),
         );
@@ -195,7 +215,11 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     requestAnimationFrame(frame);
     timer.update();
     const delta = timer.getDelta();
+    blink = idle.blink(delta);
     applyExpressions(delta);
+    // **姿勢は VRM の update より先に当てる。** 正規化ボーンへ書いた回転を
+    // 実ボーンへ写すのが update の仕事なので、後から書いても 1 フレーム遅れる。
+    if (current) idle.update(current, delta);
     // 揺れもの・表情・視線はすべて VRM 側の update が進める。
     current?.update(delta);
     controls.update();
@@ -236,6 +260,13 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
       unload();
       scene.add(vrm.scene);
       current = vrm;
+
+      // **T ポーズのまま立たせない**（→ Q-27）。素材を持ち込まなくても、
+      // ボーンを寝かせるだけで待機の見た目は作れる。
+      idle.apply(vrm);
+      // 見ている人を見る。**カメラはシーンに入れていない**が、描画のたびに
+      // three.js が行列を更新するので、そのまま注視点として使える。
+      if (vrm.lookAt) vrm.lookAt.target = camera;
 
       // 待機時の表情（→ D-36 の 1）。プリセット名しか受け取らないので、
       // モデルを差し替えても同じ名前で通る。実際に当てるのは毎フレームの

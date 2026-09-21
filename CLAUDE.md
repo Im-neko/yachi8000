@@ -217,6 +217,7 @@ web/             アバター表示 + 設定 UI のフロントエンド（フ�
   src/
     api.ts           agent の /api/v1/avatar/* を叩く。**既定値でごまかさない**（取れなければ落とす）。SSE の購読もここ
     stage.ts         three.js の土台。VRM の読み込み・破棄・表情・カメラ・口形（F-21）
+    pose.ts          待機の姿勢と細かい動き（呼吸・まばたき）。**T ポーズのまま立たせない**（F-20）
     audio.ts         読み上げをブラウザでも鳴らす（F-23）。**押されるまで鳴らない**
     main.ts          canvas・ボタン・状態表示の配線
   vite.config.ts   dev は 5174。/api だけ agent（5173）へ回す
