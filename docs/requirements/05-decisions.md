@@ -776,6 +776,15 @@ three-vrm の `expressionManager` が、モデル固有の blendshape 名（例:
 - **話者の判別に使える**（→ F-05）。forward auth は利用者を示すヘッダをアプリまで通すので、そこから `SpeakerId` を作れば「Web インターフェイスでは認証が話者判別の前提」が満たせる。**ただしヘッダは ingress が必ず上書きすることが前提** —— 外から偽装ヘッダを付けられる経路が 1 つでもあれば、名乗りを自己申告にしたのと同じになる。**配線時に実際に偽装を試して確かめること**
 - **クラスタにはまだ forward auth を使っているアプリが 1 つも無い**（2026-09-20 時点でインフラ定義側に該当する annotation が無い）。outpost の配線はこれが最初になるので、**認証基盤側の作業が先に要る**
 
+**配線の記録**（2026-09-20）。実際に載せたものと、途中で分かったこと:
+
+- **認証基盤側が先**（そちらが無いと `/outpost.goauthentik.io/*` はどのプロバイダにも解決されず 404 になる）。proxy provider（`forward_single`）・application・**埋め込み outpost への紐づけ**を blueprint で宣言し、`authentik_host` も入れる（空だとブラウザ向けの認可 URL が localhost のまま組まれる）。**UI で作らない** —— 手で作ったオブジェクトは GitOps の管理外で、クラスタ再構築時に復元されない
+- **`/outpost.goauthentik.io` を受ける Ingress は認証基盤の namespace に置く。** Ingress のバックエンドは同じ namespace の Service しか指せない。ingress-nginx は同じホストの Ingress を 1 つの server ブロックにまとめるので、TLS はアプリ側の Ingress が持っているものがそのまま効く
+- **アプリ側の Ingress は 2 本に分ける。** annotation は Ingress 単位でしか効かない。`/` に forward auth を付け、**自前の Bearer 認証を持つ API と死活監視だけ**を別 Ingress で素通しにする。認証済みの呼び出しをログイン画面へ 302 すると、JSON を期待している呼び出し側が壊れる
+- **`X-Forwarded-Host` を `auth-snippet` で渡す公式手順は、このクラスタでは通らない。** ingress-nginx が 2 つ動いていて（GitOps 管理のものと Kubernetes ディストリビューション同梱のもの）、**どちらも class `nginx` の Ingress を admission で検証する。** 後者は snippet を許可していないため、`*-snippet` を含む Ingress は拒否される。ConfigMap を指す `auth-proxy-set-headers` に替えた（値は nginx の設定へそのまま書き出されるので変数が使える）。**認証のサブリクエストでは `Host` が `auth-url` のホストに差し替わる**ため、この転送自体は省けない
+- **順序を間違えた。** アバターをデプロイした時点（2026-09-20）で ingress は `/` を素通しで公開しており、**ビューアのページと `/api/v1/avatar/*` が認証なしでインターネットから見える状態が数時間続いた。** D-37 で「forward auth が前提」と書いておきながら、既存の ingress を確認せずにイメージを上げたため。**公開経路を持つアプリでは、機能より先に ingress を見る**
+- **利用者を示すヘッダが信用できるのは、forward auth をかけた Ingress の下だけ**（→ F-05）。生成された nginx の設定を読んで確かめた: `/` の location には `auth_request_set $authHeaderN $upstream_http_x_authentik_*;` と `proxy_set_header 'X-authentik-*' $authHeaderN;` が並び、**client が付けてきた同名のヘッダは必ず上書きされる**。一方、**素通しにした path の location にはこの行が無い** —— そちらへ偽装ヘッダを付ければアプリまでそのまま届く。**`SpeakerId` をこのヘッダから作るなら、対象を forward auth の下の経路に限ること**
+
 
 ### D-38. 発話イベントは SSE で配る。リップシンクの長さは `speedScale` で割る（Q-07 の決着）
 

@@ -130,3 +130,7 @@ dev サーバの proxy とは別物。最終確認は `cd web && npm run build` 
 
 **このページに認証は無い**（→ D-37）。守るのは ingress 側で、アプリには認証のコードを入れない。
 **通知 API（F-18）とは別物** —— あちらは「発話させられる入口」なので、自前の Bearer トークンを持ち続ける。
+
+本番では ingress の forward auth を通しているので、**ページと `/api/v1/avatar/*` はログインしないと開けない**
+（未ログインだと 302 でログイン画面へ飛ぶ）。素通しなのは `/api/v1/notify`・`/api/v1/voice/status`・
+`/api/v1/health` の 3 つだけ。配線は GitOps リポジトリ側にある（→ `deploy.md`）。
