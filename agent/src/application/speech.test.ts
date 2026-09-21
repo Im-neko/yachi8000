@@ -178,6 +178,10 @@ describe('createSpeechService', () => {
     await vi.waitFor(() => expect(h.log.warn).toHaveBeenCalledTimes(2));
 
     expect(h.played).toEqual(['A。']);
+    // **B は先読みで合成済み**（A の再生中に仕込む → D-11）。出口が無くなった
+    // のはその後なので、合成 1 回ぶんは無駄になる。**これは意図した無駄**で、
+    // 先読みをやめると文の間に無音が空く。
+    expect(h.synthesized).toEqual(['A。', 'B。']);
     // 残った 2 文は 1 文ずつ捨てる。**どれを捨てたかが分かる形にする**
     // （出どころごとに出口が違うので、まとめて捨てると理由が消える → D-40）。
     expect(h.log.warn.mock.calls[0]?.[0]).toEqual({
