@@ -48,10 +48,13 @@ voice:
   pitchScale: 0.0
 
 notification:
-  # VC に未接続のときの扱い。text ならテキストチャンネルへ回す、drop なら捨てる。
-  # どちらでも「配信できなかった」ことはログに残る。
-  whenNotInVoice: drop
-  # whenNotInVoice: text のときの配信先。未設定なら drop と同じ扱いになる。
+  # 読み上げる出口がひとつも無いときの扱い。text ならテキストチャンネルへ回す、
+  # drop なら捨てる。どちらでも「配信できなかった」ことはログに残る。
+  #
+  # 「出口」は VC の接続と、音を鳴らせるブラウザ（アバターのページで
+  # 「音を出す」を押したタブ）の両方を指す。どちらかが聞いていれば読み上げる。
+  whenNoOutput: drop
+  # whenNoOutput: text のときの配信先。未設定なら drop と同じ扱いになる。
   # fallbackChannelId: "000000000000000000"
   # 通知が名前で選べる配信先。POST /api/v1/notify の channel に名前を書くと、
   # VC の接続状況に関わらずここのチャンネルへ必ず残る（読み上げは同じサーバに

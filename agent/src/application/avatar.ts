@@ -4,7 +4,10 @@ import {
   avatarViewOf,
 } from '../domain/avatar.ts';
 import type { AvatarEvent } from '../domain/avatar-event.ts';
-import type { AvatarEventSource } from '../domain/ports/avatar-event-publisher.ts';
+import type {
+  AvatarEventSource,
+  SubscribeOptions,
+} from '../domain/ports/avatar-event-publisher.ts';
 import type { ModelFileReader } from '../domain/ports/model-file-reader.ts';
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
 import type { SpeechAudioStore } from '../domain/ports/speech-audio-store.ts';
@@ -69,9 +72,9 @@ export async function avatarModel(
 export function subscribeAvatarEvents(
   deps: AvatarDependencies,
   listener: (event: AvatarEvent) => void,
-  onClose?: () => void,
+  options: SubscribeOptions,
 ): () => void {
-  return deps.events.subscribe(listener, onClose);
+  return deps.events.subscribe(listener, options);
 }
 
 /**

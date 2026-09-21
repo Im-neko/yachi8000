@@ -4,7 +4,6 @@ import type {
   ScheduleReminderInput,
 } from '../domain/ports/reminder-store.ts';
 import type { TextNotifier } from '../domain/ports/text-notifier.ts';
-import type { VoiceOutput } from '../domain/ports/voice-output.ts';
 import {
   composeReminderText,
   describeRecurrence,
@@ -26,7 +25,6 @@ export interface ReminderDependencies {
 export interface ReminderDeliveryDependencies extends ReminderDependencies {
   phraser: ReminderPhraser;
   speech: SpeechService;
-  voice: VoiceOutput;
   text: TextNotifier;
   log: {
     info(context: Record<string, unknown>, message: string): void;
@@ -188,19 +186,20 @@ export async function fireDueReminders(
     warnOnSkippedOccurrences(deps, reminder, now);
     const text = await phraseOrDegrade(deps, reminder, now);
 
-    const inSameGuild =
-      reminder.guildId !== undefined &&
-      deps.voice.current()?.guildId === reminder.guildId;
-    if (inSameGuild) {
-      deps.speech.speak({ text, priority: 'reminder' });
+    // 読み上げるかどうかは出口の状態で決まる（→ D-40）。**テキストは必ず
+    // 残す** —— 時刻を指定したのは利用者なので、誰も聞いていなくても消えない。
+    const origin = {
+      kind: 'reminder',
+      guildId: reminder.guildId,
+    } as const;
+    const spoken = deps.speech.canSpeak(origin);
+    if (spoken) {
+      deps.speech.speak({ text, priority: 'reminder', origin });
     }
 
     try {
       await deps.text.send(reminder.channelId, text);
-      deps.log.info(
-        { reminderId: reminder.id, spoken: inSameGuild },
-        'Fired a reminder',
-      );
+      deps.log.info({ reminderId: reminder.id, spoken }, 'Fired a reminder');
     } catch (error) {
       // 発火済みの印は既に立っている。再送しないのは、二重に読み上げる方が
       // 取り落とすより悪いという判断（→ D-23）。落としたことは必ず出す。

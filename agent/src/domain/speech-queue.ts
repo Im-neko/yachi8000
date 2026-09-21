@@ -1,4 +1,5 @@
 import { SPEECH_PRIORITIES, type SpeechPriority } from './speech.ts';
+import type { SpeechOrigin } from './speech-audience.ts';
 
 /** キューに載っている 1 文。同一性で「取り出す予定だった文」を識別する。 */
 export interface QueuedSentence {
@@ -6,11 +7,17 @@ export interface QueuedSentence {
   /** 投入順。優先度が同じならこの順に読む（「たまたま速かった方が先」にしない）。 */
   readonly seq: number;
   readonly text: string;
+  /**
+   * どこから来た発話か。**取り出すたびに出口を選び直す**ために持ち歩く
+   * （→ D-40）。積んでいる間に VC から抜けることも、ブラウザが開くこともある。
+   */
+  readonly origin: SpeechOrigin;
 }
 
 export interface SpeechRequest {
   readonly priority: SpeechPriority;
   readonly sentences: readonly string[];
+  readonly origin: SpeechOrigin;
 }
 
 export interface SpeechQueue {
@@ -69,6 +76,7 @@ export function createSpeechQueue(capacity: number): SpeechQueue {
           priority: request.priority,
           seq,
           text,
+          origin: request.origin,
         });
       }
       return true;

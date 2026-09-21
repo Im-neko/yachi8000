@@ -17,15 +17,27 @@ export interface AvatarEventPublisher {
  * **購読した直後に「今の状態」が 1 回流れてくる。** 読み上げの途中で
  * ページを開いた人が、次の発話まで待機の顔のまま止まらないようにするため。
  */
-export interface AvatarEventSource {
+export interface SubscribeOptions {
   /**
-   * 戻り値を呼ぶと購読をやめる。
+   * **音を鳴らせると名乗っているか**（F-23, D-40）。
    *
-   * `onClose` は**配る側から打ち切られたとき**に呼ばれる（停止処理）。
+   * 既定は消音なので、つないでいるだけのタブを出口と数えると、通知が無音へ
+   * 向かって「喋った」ことになる。名乗ったタブだけを出口として数える。
+   */
+  readonly audio: boolean;
+  /**
+   * **配る側から打ち切られたとき**に呼ばれる（停止処理）。
    * これが無いと、開いたままの配信が停止をぶら下げる（→ D-38 の 5）。
    */
+  readonly onClose?: () => void;
+}
+
+export interface AvatarEventSource {
+  /** 戻り値を呼ぶと購読をやめる。 */
   subscribe(
     listener: (event: AvatarEvent) => void,
-    onClose?: () => void,
+    options: SubscribeOptions,
   ): () => void;
+  /** 音を鳴らせると名乗っている購読者の数（→ D-40）。 */
+  listeningBrowsers(): number;
 }

@@ -38,7 +38,7 @@ const SettingsSchema = v.object({
     pitchScale: v.pipe(v.number(), v.minValue(-0.15), v.maxValue(0.15)),
   }),
   notification: v.object({
-    whenNotInVoice: v.picklist(['text', 'drop']),
+    whenNoOutput: v.picklist(['text', 'drop']),
     fallbackChannelId: v.optional(Snowflake),
     channels: v.optional(
       v.record(

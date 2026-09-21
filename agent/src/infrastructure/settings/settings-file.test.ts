@@ -13,7 +13,7 @@ voice:
   speedScale: 1.0
   pitchScale: 0.0
 notification:
-  whenNotInVoice: drop
+  whenNoOutput: drop
 behavior:
   personaLock: false
   reminderPollIntervalSeconds: 30
@@ -90,10 +90,10 @@ describe('parseSettingsYaml', () => {
     ).toThrow(/検証に失敗/);
   });
 
-  it('whenNotInVoice は text / drop のみ', () => {
+  it('whenNoOutput は text / drop のみ', () => {
     expect(() =>
       parseSettingsYaml(
-        valid.replace('whenNotInVoice: drop', 'whenNotInVoice: voice'),
+        valid.replace('whenNoOutput: drop', 'whenNoOutput: voice'),
       ),
     ).toThrow(/検証に失敗/);
   });
@@ -102,8 +102,8 @@ describe('parseSettingsYaml', () => {
     expect(() =>
       parseSettingsYaml(
         valid.replace(
-          'whenNotInVoice: drop',
-          "whenNotInVoice: text\n  fallbackChannelId: 'abc'",
+          'whenNoOutput: drop',
+          "whenNoOutput: text\n  fallbackChannelId: 'abc'",
         ),
       ),
     ).toThrow(/検証に失敗/);
@@ -112,8 +112,8 @@ describe('parseSettingsYaml', () => {
   it('名前で選べる配信先を読める', () => {
     const settings = parseSettingsYaml(
       valid.replace(
-        'whenNotInVoice: drop',
-        "whenNotInVoice: drop\n  channels:\n    money:\n      guildId: '111111111111111111'\n      channelId: '222222222222222222'",
+        'whenNoOutput: drop',
+        "whenNoOutput: drop\n  channels:\n    money:\n      guildId: '111111111111111111'\n      channelId: '222222222222222222'",
       ),
     );
     expect(settings.notification.channels?.money).toEqual({
@@ -127,8 +127,8 @@ describe('parseSettingsYaml', () => {
     expect(() =>
       parseSettingsYaml(
         valid.replace(
-          'whenNotInVoice: drop',
-          "whenNotInVoice: drop\n  channels:\n    money:\n      channelId: '222222222222222222'",
+          'whenNoOutput: drop',
+          "whenNoOutput: drop\n  channels:\n    money:\n      channelId: '222222222222222222'",
         ),
       ),
     ).toThrow(/検証に失敗/);
@@ -138,8 +138,8 @@ describe('parseSettingsYaml', () => {
     expect(() =>
       parseSettingsYaml(
         valid.replace(
-          'whenNotInVoice: drop',
-          "whenNotInVoice: drop\n  channels:\n    お金:\n      guildId: '111111111111111111'\n      channelId: '222222222222222222'",
+          'whenNoOutput: drop',
+          "whenNoOutput: drop\n  channels:\n    お金:\n      guildId: '111111111111111111'\n      channelId: '222222222222222222'",
         ),
       ),
     ).toThrow(/検証に失敗/);

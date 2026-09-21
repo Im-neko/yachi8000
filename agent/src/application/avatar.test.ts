@@ -27,7 +27,7 @@ function createDeps(
   return {
     settings: { get: () => settings },
     models: { read },
-    events: { subscribe: () => () => undefined },
+    events: { subscribe: () => () => undefined, listeningBrowsers: () => 0 },
     audio: { put: () => 'id', get: (id) => stored.get(id) },
     log: {
       warn: (_context, message) => {

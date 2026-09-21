@@ -18,8 +18,8 @@ describe('createAvatarEventBroadcaster', () => {
     const { broadcaster } = setup();
     const a: AvatarEvent[] = [];
     const b: AvatarEvent[] = [];
-    broadcaster.subscribe((event) => a.push(event));
-    broadcaster.subscribe((event) => b.push(event));
+    broadcaster.subscribe((event) => a.push(event), { audio: false });
+    broadcaster.subscribe((event) => b.push(event), { audio: false });
 
     broadcaster.publish(SPEECH);
 
@@ -28,13 +28,29 @@ describe('createAvatarEventBroadcaster', () => {
     expect(broadcaster.subscribers()).toBe(2);
   });
 
+  // D-40。既定は消音なので、名乗ったタブだけを音の出口として数える。
+  it('音を鳴らせると名乗ったタブだけを数える', () => {
+    const { broadcaster } = setup();
+
+    broadcaster.subscribe(() => undefined, { audio: false });
+    expect(broadcaster.listeningBrowsers()).toBe(0);
+
+    const stop = broadcaster.subscribe(() => undefined, { audio: true });
+    expect(broadcaster.listeningBrowsers()).toBe(1);
+    expect(broadcaster.subscribers()).toBe(2);
+
+    stop();
+    expect(broadcaster.listeningBrowsers()).toBe(0);
+    expect(broadcaster.subscribers()).toBe(1);
+  });
+
   // 読み上げの途中でページを開いた人が、次の発話まで待機の顔で止まらないように。
   it('購読した直後に今の状態を流す', () => {
     const { broadcaster } = setup();
     broadcaster.publish({ kind: 'state', state: 'speaking' });
 
     const received: AvatarEvent[] = [];
-    broadcaster.subscribe((event) => received.push(event));
+    broadcaster.subscribe((event) => received.push(event), { audio: false });
 
     expect(received).toEqual([{ kind: 'state', state: 'speaking' }]);
   });
@@ -42,7 +58,7 @@ describe('createAvatarEventBroadcaster', () => {
   it('まだ何も起きていなければ待機を流す', () => {
     const { broadcaster } = setup();
     const received: AvatarEvent[] = [];
-    broadcaster.subscribe((event) => received.push(event));
+    broadcaster.subscribe((event) => received.push(event), { audio: false });
 
     expect(received).toEqual([{ kind: 'state', state: 'idle' }]);
   });
@@ -53,7 +69,7 @@ describe('createAvatarEventBroadcaster', () => {
     broadcaster.publish(SPEECH);
 
     const received: AvatarEvent[] = [];
-    broadcaster.subscribe((event) => received.push(event));
+    broadcaster.subscribe((event) => received.push(event), { audio: false });
 
     expect(received).toEqual([{ kind: 'state', state: 'idle' }]);
   });
@@ -61,7 +77,9 @@ describe('createAvatarEventBroadcaster', () => {
   it('購読をやめたら届かなくなる', () => {
     const { broadcaster } = setup();
     const received: AvatarEvent[] = [];
-    const unsubscribe = broadcaster.subscribe((event) => received.push(event));
+    const unsubscribe = broadcaster.subscribe((event) => received.push(event), {
+      audio: false,
+    });
     unsubscribe();
 
     broadcaster.publish(SPEECH);
@@ -73,11 +91,14 @@ describe('createAvatarEventBroadcaster', () => {
   // 1 人が投げても読み上げと他の購読者を巻き込まない（INV-7）。
   it('購読者が投げても他へは届き、ERROR に残る', () => {
     const { broadcaster, log } = setup();
-    broadcaster.subscribe(() => {
-      throw new Error('壊れた購読者');
-    });
+    broadcaster.subscribe(
+      () => {
+        throw new Error('壊れた購読者');
+      },
+      { audio: false },
+    );
     const received: AvatarEvent[] = [];
-    broadcaster.subscribe((event) => received.push(event));
+    broadcaster.subscribe((event) => received.push(event), { audio: false });
 
     expect(() => broadcaster.publish(SPEECH)).not.toThrow();
     expect(received.at(-1)).toEqual(SPEECH);

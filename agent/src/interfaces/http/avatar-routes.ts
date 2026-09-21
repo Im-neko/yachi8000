@@ -93,6 +93,11 @@ export function createAvatarRoutes(
         stream.onAbort(resolve);
       });
 
+      // **`?audio=1` は「このタブは音を鳴らせる」という名乗り**（F-23, D-40）。
+      // 名乗ったタブだけを出口として数える —— 既定は消音なので、つないで
+      // いるだけのタブを数えると通知が無音へ向かって「喋った」ことになる。
+      const audio = c.req.query('audio') === '1';
+
       const unsubscribe = subscribeAvatarEvents(
         deps,
         (event) => {
@@ -102,7 +107,7 @@ export function createAvatarRoutes(
             .writeSSE({ event: event.kind, data: JSON.stringify(event) })
             .catch(() => undefined);
         },
-        () => finish(),
+        { audio, onClose: () => finish() },
       );
 
       const keepAlive = setInterval(() => {

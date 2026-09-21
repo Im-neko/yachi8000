@@ -37,9 +37,13 @@ export interface Settings {
     };
   };
   notification: {
-    /** VC に未接続のときの扱い（F-15）。どちらでも配信できなかったことはログに残す。 */
-    whenNotInVoice: 'text' | 'drop';
-    /** `whenNotInVoice: 'text'` のときの配信先チャンネル。未設定なら破棄に倒す。 */
+    /**
+     * **読み上げる出口がひとつも無いとき**の扱い（F-15, D-40）。VC にも
+     * つながっておらず、音を鳴らせるブラウザも開いていない場合を指す。
+     * どちらでも配信できなかったことはログに残す。
+     */
+    whenNoOutput: 'text' | 'drop';
+    /** `whenNoOutput: 'text'` のときの配信先チャンネル。未設定なら破棄に倒す。 */
     fallbackChannelId?: string;
     /**
      * 通知が名前で選べる配信先（F-15）。

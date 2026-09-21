@@ -7,6 +7,9 @@ import { createSpeechService, type SpeechDependencies } from './speech.ts';
 
 const CHANNEL: VoiceChannelRef = { guildId: 'g', channelId: 'c' };
 
+/** 既定の出どころ。VC と同じサーバの会話（＝ VC もブラウザも受け取る）。 */
+const ORIGIN = { kind: 'conversation', guildId: 'g' } as const;
+
 /** 文ごとに見分けが付く口形列。合成した文と結び付いていることを確かめる用。 */
 function timelineFor(text: string): VisemeTimeline {
   return {
@@ -21,6 +24,8 @@ function createHarness() {
   const events: AvatarEvent[] = [];
   const stored = new Map<string, string>();
   let connected: VoiceChannelRef | undefined = CHANNEL;
+  let listeningBrowsers = 0;
+  const slept: number[] = [];
   let pending: { resolve: () => void } | undefined;
   let onPlay: (() => void) | undefined;
   let failNext = false;
@@ -53,6 +58,15 @@ function createHarness() {
           onPlay?.();
         }),
     },
+    outputs: {
+      current: () => ({
+        voiceGuildId: connected?.guildId,
+        listeningBrowsers,
+      }),
+    },
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
     avatar: {
       publish: (event) => {
         events.push(event);
@@ -82,8 +96,13 @@ function createHarness() {
     events,
     stored,
     log,
+    slept,
     disconnect() {
       connected = undefined;
+    },
+    /** ブラウザが「音を出す」を押した状態にする（F-23, D-40）。 */
+    openBrowser() {
+      listeningBrowsers = 1;
     },
     /** 次の合成を 1 回だけ失敗させる。 */
     failNext() {
@@ -112,12 +131,16 @@ describe('createSpeechService', () => {
   it('再生中に届いた通知を、次の文の切れ目で割り込ませる', async () => {
     const h = createHarness();
 
-    h.service.speak({ text: 'R1。R2。R3。', priority: 'reply' });
+    h.service.speak({
+      text: 'R1。R2。R3。',
+      priority: 'reply',
+      origin: ORIGIN,
+    });
     await h.waitForPlay();
     expect(h.played).toEqual(['R1。']);
 
     // R2 を先読み合成している最中に通知が届く。
-    h.service.speak({ text: 'N。', priority: 'notification' });
+    h.service.speak({ text: 'N。', priority: 'notification', origin: ORIGIN });
     h.finishPlay();
 
     await h.waitForPlay();
@@ -135,7 +158,7 @@ describe('createSpeechService', () => {
   it('割り込まれずに続く場合は先読みした合成結果を使い回す', async () => {
     const h = createHarness();
 
-    h.service.speak({ text: 'A。B。', priority: 'reply' });
+    h.service.speak({ text: 'A。B。', priority: 'reply', origin: ORIGIN });
     await h.waitForPlay();
     h.finishPlay();
     await h.waitForPlay();
@@ -145,17 +168,66 @@ describe('createSpeechService', () => {
     expect(h.synthesized).toEqual(['A。', 'B。']);
   });
 
-  it('再生中に VC から切れたら残りを捨てて WARN を出す', async () => {
+  it('再生中に出口が全部いなくなったら、残りを捨てて WARN を出す', async () => {
     const h = createHarness();
 
-    h.service.speak({ text: 'A。B。C。', priority: 'reply' });
+    h.service.speak({ text: 'A。B。C。', priority: 'reply', origin: ORIGIN });
     await h.waitForPlay();
     h.disconnect();
     h.finishPlay();
-    await vi.waitFor(() => expect(h.log.warn).toHaveBeenCalled());
+    await vi.waitFor(() => expect(h.log.warn).toHaveBeenCalledTimes(2));
 
     expect(h.played).toEqual(['A。']);
-    expect(h.log.warn.mock.calls[0]?.[0]).toEqual({ dropped: 2 });
+    // 残った 2 文は 1 文ずつ捨てる。**どれを捨てたかが分かる形にする**
+    // （出どころごとに出口が違うので、まとめて捨てると理由が消える → D-40）。
+    expect(h.log.warn.mock.calls[0]?.[0]).toEqual({
+      priority: 'reply',
+      origin: 'conversation',
+    });
+  });
+
+  // D-40。Discord と Web は対等なので、VC にいなくても喋る。
+  it('VC にいなくても、音を鳴らせるブラウザが開いていれば喋る', async () => {
+    const h = createHarness();
+    h.disconnect();
+    h.openBrowser();
+
+    h.service.speak({ text: 'A。B。', priority: 'reply', origin: ORIGIN });
+    await vi.waitFor(() => expect(h.synthesized).toEqual(['A。', 'B。']));
+
+    // VC へは流れない。**再生の歩調は口形の長さで取る** —— 待たないと
+    // 全文が一瞬で流れ、ブラウザ側は最後の 1 文だけが鳴る。
+    expect(h.played).toEqual([]);
+    expect(h.slept).toEqual([200, 200]);
+    expect(h.events.filter((event) => event.kind === 'speech')).toHaveLength(2);
+  });
+
+  it('VC にもブラウザにも出口が無ければ、積まずに捨てる', async () => {
+    const h = createHarness();
+    h.disconnect();
+
+    h.service.speak({ text: 'A。B。', priority: 'reply', origin: ORIGIN });
+
+    expect(h.service.pending()).toBe(0);
+    expect(h.synthesized).toEqual([]);
+    // 宛先の判定であって縮退ではないので WARN にはしない（→ D-40）。
+    expect(h.log.warn).not.toHaveBeenCalled();
+    expect(h.log.debug).toHaveBeenCalled();
+  });
+
+  it('DM の応答はブラウザへ出さない（Q-26 が決まるまで）', () => {
+    const h = createHarness();
+    h.disconnect();
+    h.openBrowser();
+
+    h.service.speak({
+      text: 'DM です。',
+      priority: 'reply',
+      origin: { kind: 'conversation' },
+    });
+
+    expect(h.service.pending()).toBe(0);
+    expect(h.synthesized).toEqual([]);
   });
 
   it('上限を超えた発話は丸ごと捨てて WARN を出す', () => {
@@ -164,8 +236,12 @@ describe('createSpeechService', () => {
     // 上限（200 文）ちょうどまで積んだうえで、2 文の発話を投げる。
     // 1 文だけなら再生中の分の空きに入ってしまうので、入り切らない長さにする。
     const full = Array.from({ length: 200 }, (_, i) => `S${i}。`).join('');
-    h.service.speak({ text: full, priority: 'reply' });
-    h.service.speak({ text: 'あふれた。捨てられる。', priority: 'reply' });
+    h.service.speak({ text: full, priority: 'reply', origin: ORIGIN });
+    h.service.speak({
+      text: 'あふれた。捨てられる。',
+      priority: 'reply',
+      origin: ORIGIN,
+    });
 
     expect(h.log.warn).toHaveBeenCalledOnce();
     expect(h.played).not.toContain('あふれた。');
@@ -176,7 +252,7 @@ describe('createSpeechService', () => {
   it('文を再生する直前に、その文の口形を出す', async () => {
     const h = createHarness();
 
-    h.service.speak({ text: 'A。', priority: 'reply' });
+    h.service.speak({ text: 'A。', priority: 'reply', origin: ORIGIN });
     await h.waitForPlay();
 
     expect(h.events).toEqual([
@@ -193,9 +269,9 @@ describe('createSpeechService', () => {
   it('割り込まれたら、実際に再生する文の口形を出す', async () => {
     const h = createHarness();
 
-    h.service.speak({ text: 'R1。R2。', priority: 'reply' });
+    h.service.speak({ text: 'R1。R2。', priority: 'reply', origin: ORIGIN });
     await h.waitForPlay();
-    h.service.speak({ text: 'N。', priority: 'notification' });
+    h.service.speak({ text: 'N。', priority: 'notification', origin: ORIGIN });
     h.finishPlay();
     await h.waitForPlay();
 
@@ -211,7 +287,7 @@ describe('createSpeechService', () => {
     const h = createHarness();
     h.failNext();
 
-    h.service.speak({ text: 'A。B。', priority: 'reply' });
+    h.service.speak({ text: 'A。B。', priority: 'reply', origin: ORIGIN });
     await h.waitForPlay();
 
     expect(h.played).toEqual(['B。']);
@@ -225,7 +301,7 @@ describe('createSpeechService', () => {
   it('ブラウザへ渡す音は、Discord へ流したのと同じ合成結果', async () => {
     const h = createHarness();
 
-    h.service.speak({ text: 'A。B。', priority: 'reply' });
+    h.service.speak({ text: 'A。B。', priority: 'reply', origin: ORIGIN });
     await h.waitForPlay();
     h.finishPlay();
     await h.waitForPlay();
@@ -242,6 +318,7 @@ describe('createSpeechService', () => {
     service.speak({
       text: 'PR を出しました。https://example.com/pr/1 を見てください。',
       priority: 'notification',
+      origin: ORIGIN,
     });
     await vi.waitFor(() => {
       expect(synthesized.length).toBe(2);

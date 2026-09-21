@@ -5,13 +5,11 @@ import {
 import type { NotificationRewriter } from '../domain/ports/notification-rewriter.ts';
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
 import type { TextNotifier } from '../domain/ports/text-notifier.ts';
-import type { VoiceOutput } from '../domain/ports/voice-output.ts';
 import type { SpeechService } from './speech.ts';
 
 export interface NotifyDependencies {
   rewriter: NotificationRewriter;
   speech: SpeechService;
-  voice: VoiceOutput;
   text: TextNotifier;
   settings: SettingsProvider;
   log: {
@@ -28,6 +26,9 @@ export interface NotifyDependencies {
  * 「どちらが届いたか」が分かる形にしてある。`unknown-channel` だけは配信の
  * 結果ではなく**送信元の誤り**で、呼び出し側が 400 に写す。
  */
+/** 外部通知の出どころ。宛先を持たないので、つながっている出口すべてへ出す。 */
+const NOTIFICATION_ORIGIN = { kind: 'notification' } as const;
+
 export type NotificationDisposition =
   | 'spoken'
   | 'delivered-as-text'
@@ -79,18 +80,21 @@ export async function notify(
     return await deliverToNamedChannel(deps, notification, target, acceptedAt);
   }
 
-  if (deps.voice.current()) {
+  // **VC にいるか**ではなく、**受け取る出口があるか**で決める（→ D-40）。
+  // Discord と Web は対等なので、ブラウザだけが聞いていても読み上げる。
+  if (deps.speech.canSpeak(NOTIFICATION_ORIGIN)) {
     deps.speech.speak({
       text: await rewriteOrDegrade(deps, notification),
       priority: 'notification',
+      origin: NOTIFICATION_ORIGIN,
     });
     lastAcceptedAt = acceptedAt;
     deps.log.info({ source: notification.source }, 'Speaking a notification');
     return 'spoken';
   }
 
-  const { whenNotInVoice, fallbackChannelId } = settings;
-  if (whenNotInVoice === 'text' && fallbackChannelId) {
+  const { whenNoOutput, fallbackChannelId } = settings;
+  if (whenNoOutput === 'text' && fallbackChannelId) {
     try {
       await deps.text.send(
         fallbackChannelId,
@@ -99,7 +103,7 @@ export async function notify(
       lastAcceptedAt = acceptedAt;
       deps.log.info(
         { source: notification.source, channelId: fallbackChannelId },
-        'Not in a voice channel — delivered the notification as text',
+        'No output is listening — delivered the notification as text',
       );
       return 'delivered-as-text';
     } catch (error) {
@@ -109,7 +113,7 @@ export async function notify(
           source: notification.source,
           channelId: fallbackChannelId,
         },
-        'Not in a voice channel and the text fallback failed — dropped the notification',
+        'No output is listening and the text fallback failed — dropped the notification',
       );
       return 'dropped';
     }
@@ -118,10 +122,10 @@ export async function notify(
   deps.log.warn(
     {
       source: notification.source,
-      whenNotInVoice,
+      whenNoOutput,
       hasFallbackChannel: Boolean(fallbackChannelId),
     },
-    'Not in a voice channel — dropped the notification',
+    'No output is listening — dropped the notification',
   );
   return 'dropped';
 }
@@ -140,12 +144,15 @@ async function deliverToNamedChannel(
   acceptedAt: number,
 ): Promise<NotificationDisposition> {
   // 別サーバの VC にいるときに読み上げると、関係のない人へ内容が漏れる
-  // （リマインダーの F-31 と同じ規則）。
-  const inSameGuild = deps.voice.current()?.guildId === target.guildId;
-  if (inSameGuild) {
+  // （リマインダーの F-31 と同じ規則）。宛先をそのまま出どころに載せ、
+  // どの出口が受け取るかは発話側が決める（→ D-40）。
+  const origin = { kind: 'notification', guildId: target.guildId } as const;
+  const spoken = deps.speech.canSpeak(origin);
+  if (spoken) {
     deps.speech.speak({
       text: await rewriteOrDegrade(deps, notification),
       priority: 'notification',
+      origin,
     });
   }
 
@@ -153,7 +160,7 @@ async function deliverToNamedChannel(
     source: notification.source,
     channel: notification.channel,
     channelId: target.channelId,
-    spoken: inSameGuild,
+    spoken,
   };
 
   try {
@@ -163,14 +170,14 @@ async function deliverToNamedChannel(
     );
     lastAcceptedAt = acceptedAt;
     deps.log.info(context, 'Delivered a notification to the addressed channel');
-    return inSameGuild ? 'spoken-and-delivered' : 'delivered-as-text';
+    return spoken ? 'spoken-and-delivered' : 'delivered-as-text';
   } catch (error) {
     deps.log.error(
       { ...context, err: error },
       'Failed to deliver a notification to the addressed channel',
     );
     // 読み上げは届いている。両方落ちたときだけ「受理しなかった」ことにする。
-    if (inSameGuild) {
+    if (spoken) {
       lastAcceptedAt = acceptedAt;
       return 'spoken';
     }

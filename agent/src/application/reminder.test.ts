@@ -10,6 +10,7 @@ import {
   type Reminder,
 } from '../domain/reminder.ts';
 import type { SpeakerId } from '../domain/speaker.ts';
+import { hasNoTarget, selectSpeechTargets } from '../domain/speech-audience.ts';
 import {
   cancelReminder,
   fireDueReminders,
@@ -117,6 +118,8 @@ async function phraseLikeAnAssistant(reminder: Reminder): Promise<string> {
 
 function createHarness(options: {
   connectedTo?: VoiceChannelRef;
+  /** 音を鳴らせると名乗っているブラウザの数（F-23, D-40）。 */
+  listeningBrowsers?: number;
   send?: () => Promise<void>;
   phrase?: (reminder: Reminder, firedAt: Date) => Promise<string>;
 }): Harness {
@@ -144,13 +147,15 @@ function createHarness(options: {
         speak: ({ text, priority }) => {
           spoken.push({ text, priority });
         },
+        // 出口の選び方は domain の関数そのものを使う（→ D-40）。
+        canSpeak: (origin) =>
+          !hasNoTarget(
+            selectSpeechTargets(origin, {
+              voiceGuildId: options.connectedTo?.guildId,
+              listeningBrowsers: options.listeningBrowsers ?? 0,
+            }),
+          ),
         pending: () => 0,
-      },
-      voice: {
-        join: async () => undefined,
-        leave: () => false,
-        current: () => options.connectedTo,
-        play: async () => undefined,
       },
       text: {
         send:
