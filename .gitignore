@@ -12,3 +12,7 @@ data/
 
 # コード解析ツールのローカルキャッシュ
 .serena/
+
+# エージェントの作業領域（worktree を含む）。**中に git リポジトリが入る**ので、
+# `git add -A` で巻き込むと embedded repository として取り込まれてしまう。
+.claude/
