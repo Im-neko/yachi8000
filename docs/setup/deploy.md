@@ -22,6 +22,7 @@ agent が受け取るのは接続情報だけ:
 | `VOICEVOX_URL` | 同じチャートが作る voicevox Service の DNS 名 |
 | `FLUE_DB_PATH` / **`APP_DB_PATH`** / `SETTINGS_PATH` | PVC 上のパス（`/data/`） |
 | `DISCORD_BOT_TOKEN` / `LLM_PROXY_API_KEY` / `NOTIFY_TOKENS` / `MEMORY_DATABASE_URL` / **`BRAVE_SEARCH_API_KEY`** | Sealed Secret |
+| `GITHUB_TOKEN` / `JEV_API_KEY`（どちらも任意） | Sealed Secret |
 
 **話者 ID・話速・音高は環境変数に入れない。** 設定ファイル（`/data/settings.yaml`）側（F-60）。
 
@@ -58,6 +59,8 @@ agent が受け取るのは接続情報だけ:
 3. **ingress に authentik の forward auth を足す**（→ D-37）。**これが無いと、ビューアのページは誰でも開ける。**
 
    **アプリ側には認証のコードが無い**（入れない決定をしている）ので、**守りは ingress にしか無い**。
+
+**表情（F-24）を効かせるなら、もう 1 つ**: Sealed Secret に `JEV_API_KEY`（[TypeSafe](https://typesafe.ai/)）を足す。**任意** —— 無くても起動し、アバターは素の顔のまま動く。無効になっていることは**起動ログの WARN 1 行**（`Expression control is disabled`）でしか分からないので、入れたつもりで入っていない事故はそこで見つける。
    agent を ingress で公開していないなら今は困らないが、公開した瞬間に開く。**公開の有無は GitOps 側を見ないと分からない**
 
    配線は GitOps リポジトリ側に 2 つある（2026-09-20 に実施。詳細は D-37）:

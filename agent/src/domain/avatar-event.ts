@@ -1,3 +1,4 @@
+import type { AvatarExpression } from './avatar.ts';
 import type { VisemeTimeline } from './lipsync.ts';
 
 /**
@@ -40,4 +41,16 @@ export type AvatarEvent =
        * 消えていることもある。
        */
       readonly speechId: string;
+    }
+  /**
+   * 顔に出す感情（F-24）。**発話ごとに 1 回**出る（→ D-41 の 1）。
+   *
+   * `weight` が 0 なら素の顔へ戻す合図。口形（`speech`）とは**別の層**で、
+   * どちらも同時に成り立つ（喋りながら笑う）。重ねかたはブラウザ側の
+   * 規則（`web/src/stage.ts`）。
+   */
+  | {
+      readonly kind: 'expression';
+      readonly expression: AvatarExpression;
+      readonly weight: number;
     };

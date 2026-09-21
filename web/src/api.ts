@@ -67,7 +67,12 @@ export interface VisemeTimeline {
 
 export type AvatarEvent =
   | { kind: 'state'; state: AvatarState }
-  | { kind: 'speech'; lipSync: VisemeTimeline; speechId: string };
+  | { kind: 'speech'; lipSync: VisemeTimeline; speechId: string }
+  /**
+   * 顔に出す感情（F-24）。**発話ごとに 1 回**来て、読み終わると
+   * `weight: 0`（素の顔）が来る。口形とは別の層で、同時に成り立つ。
+   */
+  | { kind: 'expression'; expression: VrmExpressionPreset; weight: number };
 
 /**
  * 読み上げた音（F-23）。**イベントには ID だけが載る**ので、鳴らすなら
@@ -114,8 +119,12 @@ export function subscribeAvatarEvents(
     }
   };
 
+  // **イベント名ごとに登録する。** SSE は `event:` 名で振り分けるので、
+  // ここに無い種別は届いても黙って捨てられる（`AvatarEvent` に足すだけでは
+  // 通らない）。
   source.addEventListener('state', handle);
   source.addEventListener('speech', handle);
+  source.addEventListener('expression', handle);
   source.addEventListener('open', () => onConnectionChange?.(true));
   source.addEventListener('error', () => onConnectionChange?.(false));
 
