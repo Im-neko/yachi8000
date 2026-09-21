@@ -32,6 +32,7 @@ import { createAvatarEventBroadcaster } from './infrastructure/avatar/avatar-eve
 import { createFileModelReader } from './infrastructure/avatar/file-model-reader.ts';
 import { createMemorySpeechAudioStore } from './infrastructure/avatar/memory-speech-audio-store.ts';
 import { openAppDatabase } from './infrastructure/db/app-database.ts';
+import { createDiscordApprovalPrompt } from './infrastructure/discord/approval-prompt.ts';
 import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
 import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.ts';
@@ -93,6 +94,9 @@ export const personDependencies: PersonDependencies = {
 export const skillDependencies: SkillDependencies = {
   store: createSqliteSkillStore(appDb),
   settings,
+  // 承認をその場で聞く（F-44）。**Client ではなくトークンで動く** ——
+  // キュレーターのツールは Gateway が ready になる前から組み立てられる。
+  prompt: createDiscordApprovalPrompt({ token: env.DISCORD_BOT_TOKEN }),
   log: logger,
 };
 

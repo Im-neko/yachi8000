@@ -38,4 +38,8 @@ export interface SkillStore {
   rejectAllPending(): number;
   /** approved かつ指定の種別のものを、提案順に返す。応答へマウントする対象。 */
   mountable(kinds: readonly SkillKind[]): readonly SkillCandidate[];
+  /** 承認を聞いた投稿を覚える（F-44）。 */
+  recordAsk(id: string, channelId: string, messageId: string): void;
+  /** リアクションが付いた投稿から候補を引く（F-44）。 */
+  findByAsk(channelId: string, messageId: string): SkillCandidate | undefined;
 }

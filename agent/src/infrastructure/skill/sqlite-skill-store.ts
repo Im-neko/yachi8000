@@ -19,6 +19,8 @@ interface SkillRow {
   status: string;
   proposed_at: string;
   decided_at: string | null;
+  ask_channel_id: string | null;
+  ask_message_id: string | null;
 }
 
 function toCandidate(row: SkillRow): SkillCandidate {
@@ -31,6 +33,10 @@ function toCandidate(row: SkillRow): SkillCandidate {
     status: row.status as SkillStatus,
     proposedAt: row.proposed_at,
     decidedAt: row.decided_at ?? undefined,
+    ask:
+      row.ask_channel_id && row.ask_message_id
+        ? { channelId: row.ask_channel_id, messageId: row.ask_message_id }
+        : undefined,
   };
 }
 
@@ -57,6 +63,12 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
      VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL)`,
   );
   const selectById = db.prepare(`SELECT * FROM skills WHERE id = ?`);
+  const updateAsk = db.prepare(
+    `UPDATE skills SET ask_channel_id = ?, ask_message_id = ? WHERE id = ?`,
+  );
+  const selectByAsk = db.prepare(
+    `SELECT * FROM skills WHERE ask_channel_id = ? AND ask_message_id = ?`,
+  );
   const rejectPending = db.prepare(
     `UPDATE skills SET status = 'rejected', decided_at = ?
       WHERE status = 'pending'`,
@@ -78,6 +90,7 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
         status: 'pending',
         proposedAt: new Date().toISOString(),
         decidedAt: undefined,
+        ask: undefined,
       };
       try {
         insert.run(
@@ -130,6 +143,20 @@ export function createSqliteSkillStore(db: DatabaseSync): SkillStore {
 
     rejectAllPending(): number {
       return Number(rejectPending.run(new Date().toISOString()).changes);
+    },
+
+    recordAsk(id: string, channelId: string, messageId: string): void {
+      updateAsk.run(channelId, messageId, id);
+    },
+
+    findByAsk(
+      channelId: string,
+      messageId: string,
+    ): SkillCandidate | undefined {
+      const row = selectByAsk.get(channelId, messageId) as unknown as
+        | SkillRow
+        | undefined;
+      return row ? toCandidate(row) : undefined;
     },
 
     mountable(kinds: readonly SkillKind[]): readonly SkillCandidate[] {

@@ -1,6 +1,6 @@
 'use agent';
 
-import { type AgentProps, useModel, useTool } from '@flue/runtime';
+import { type AgentProps, useDelivery, useModel, useTool } from '@flue/runtime';
 import { env } from '../config/env.ts';
 import { LLM_PROVIDER_ID } from '../infrastructure/llm/provider-id.ts';
 import { createSkillCuratorTools } from '../tools/skill.tools.ts';
@@ -55,7 +55,14 @@ const INSTRUCTIONS = `
 export function SkillCurator(_props: AgentProps) {
   useModel(MODEL, { compaction: { model: MODEL } });
 
-  for (const tool of createSkillCuratorTools()) {
+  // **どの会話から来たか**を入口が載せてくる（F-44）。承認を聞く先に使う。
+  const delivery = useDelivery();
+  const channelId =
+    delivery.kind === 'signal' ? delivery.attributes?.channelId : undefined;
+
+  for (const tool of createSkillCuratorTools({
+    channelId: typeof channelId === 'string' ? channelId : undefined,
+  })) {
     useTool(tool);
   }
 

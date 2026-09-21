@@ -12,6 +12,8 @@ export interface CuratorTurnInput {
   userText: string;
   /** アシスタントの返信。 */
   replyText: string;
+  /** 承認をその場で聞く先（F-44）。無ければ聞かない。 */
+  channelId?: string;
 }
 
 /**
@@ -49,6 +51,11 @@ export function dispatchSkillCurator(input: CuratorTurnInput): void {
           kind: 'signal',
           type: 'yachi.turn',
           body: composeCuratorMessage(input),
+          // **本文ではなく属性で渡す。** 本文は非信頼データとして扱う
+          // （INV-4）ので、そこへ混ぜると「指示ではない」が崩れる。
+          ...(input.channelId === undefined
+            ? {}
+            : { attributes: { channelId: input.channelId } }),
         },
       })
       .then(() => {

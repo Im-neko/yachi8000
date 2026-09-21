@@ -60,8 +60,13 @@ const SCHEMA = [
      kind         TEXT NOT NULL,
      status       TEXT NOT NULL,
      proposed_at  TEXT NOT NULL,
-     decided_at   TEXT
+     decided_at   TEXT,
+     -- 承認を聞いた投稿（F-44）。リアクションから候補を引き当てるための鍵。
+     ask_channel_id TEXT,
+     ask_message_id TEXT
    )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS skills_ask
+     ON skills (ask_channel_id, ask_message_id)`,
   `CREATE INDEX IF NOT EXISTS skills_status
      ON skills (status, proposed_at)`,
 
@@ -116,6 +121,35 @@ function dropTenantScopedTables(db: DatabaseSync): void {
 }
 
 /**
+ * あとから足した列。**`CREATE TABLE IF NOT EXISTS` は列を足さない**ので、
+ * 既に DB があるところでは自分で足す（上のコメントと同じ話）。
+ *
+ * 足りない列を黙って足すのではなく**ログに出す** —— 想定外の DB を触って
+ * いたときに、それが唯一の手がかりになる。
+ */
+const ADDED_COLUMNS: ReadonlyArray<{
+  table: string;
+  column: string;
+  definition: string;
+}> = [
+  { table: 'skills', column: 'ask_channel_id', definition: 'TEXT' },
+  { table: 'skills', column: 'ask_message_id', definition: 'TEXT' },
+];
+
+function addMissingColumns(db: DatabaseSync): void {
+  for (const { table, column, definition } of ADDED_COLUMNS) {
+    const columns = db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all() as unknown as { name: string }[];
+    // テーブルがまだ無い（この後 CREATE される）なら何もしない。
+    if (columns.length === 0) continue;
+    if (columns.some((existing) => existing.name === column)) continue;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    logger.info({ table, column }, 'Added a missing column');
+  }
+}
+
+/**
  * DB を開いてスキーマを用意する。**失敗したら投げる** —— 書けない状態で
  * 起動すると、リマインダーを受け付けたつもりで消えていく。
  */
@@ -131,6 +165,9 @@ export function openAppDatabase(path: string): DatabaseSync {
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
   dropTenantScopedTables(db);
+  // **列を足すのは CREATE より先。** 後だと、同じ起動の中で作られた
+  // 新しいテーブルに対して無駄な PRAGMA を引くことになる。
+  addMissingColumns(db);
   for (const statement of SCHEMA) db.exec(statement);
 
   logger.info({ path }, 'Opened the runtime state database');

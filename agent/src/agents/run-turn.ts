@@ -11,6 +11,14 @@ export interface AgentTurnInput {
   message: DeliveredMessageInput;
 }
 
+/** 承認を聞く先（F-44）。入口が載せたチャンネルをそのまま回す。 */
+function channelOf(message: DeliveredMessageInput): string | undefined {
+  if (typeof message === 'string' || message.kind !== 'signal')
+    return undefined;
+  const channelId = message.attributes?.channelId;
+  return typeof channelId === 'string' ? channelId : undefined;
+}
+
 /** 会話として渡された本文。キュレーターへ材料として回すために取り出す。 */
 function bodyOf(message: DeliveredMessageInput): string {
   if (typeof message === 'string') return message;
@@ -74,6 +82,7 @@ export async function runAgentTurn(
     conversationId: input.conversationId,
     userText: bodyOf(input.message),
     replyText: text,
+    channelId: channelOf(input.message),
   });
 
   return text;

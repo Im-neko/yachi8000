@@ -7,6 +7,8 @@ import type { Settings } from '../domain/settings.ts';
 import type { SkillCandidate, SkillStatus } from '../domain/skill.ts';
 import {
   approveSkill,
+  askForSkillApproval,
+  decideSkillByReaction,
   disableSkill,
   mountableSkills,
   proposeSkill,
@@ -44,6 +46,7 @@ function createFakeSkillStore(): SkillStore {
         status: 'pending',
         proposedAt: new Date(1_800_000_000_000 + nextId).toISOString(),
         decidedAt: undefined,
+        ask: undefined,
       };
       rows.push(candidate);
       return candidate;
@@ -54,6 +57,18 @@ function createFakeSkillStore(): SkillStore {
     },
 
     get,
+
+    recordAsk(id, channelId, messageId) {
+      const row = get(id);
+      if (row) row.ask = { channelId, messageId };
+    },
+
+    findByAsk(channelId, messageId) {
+      return rows.find(
+        (row) =>
+          row.ask?.channelId === channelId && row.ask?.messageId === messageId,
+      );
+    },
 
     transition(id, from, to) {
       const index = rows.findIndex(
@@ -99,7 +114,11 @@ function createDeps(personaLock: boolean): SkillDependencies {
     settings: {
       get: () => ({ behavior: { personaLock } }) as Settings,
     },
-    log: { info: () => undefined, debug: () => undefined },
+    log: {
+      info: () => undefined,
+      debug: () => undefined,
+      warn: () => undefined,
+    },
   };
 }
 
@@ -198,5 +217,136 @@ describe('mountableSkills と固定モード（F-34, Q-16）', () => {
     const deps = createDeps(true);
     const persona = propose(deps, 'a-persona', 'persona');
     expect(approveSkill(deps, persona.id)?.status).toBe('approved');
+  });
+});
+
+describe('リアクションでの承認（F-44）', () => {
+  function createPromptHarness() {
+    const asked: { channelId: string; text: string }[] = [];
+    const settled: { messageId: string; text: string }[] = [];
+    let nextMessageId = 0;
+    const deps = createDeps(false);
+    deps.prompt = {
+      ask: async (channelId, text) => {
+        asked.push({ channelId, text });
+        return `m${++nextMessageId}`;
+      },
+      settle: async (_channelId, messageId, text) => {
+        settled.push({ messageId, text });
+      },
+    };
+    return { deps, asked, settled };
+  }
+
+  /** 問いかけは fire-and-forget なので、記録が済むまで流す。 */
+  async function settle(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it('提案したら、その場で中身を見せて聞く', async () => {
+    const h = createPromptHarness();
+    const candidate = propose(h.deps, 'keep-it-short');
+    askForSkillApproval(h.deps, candidate, 'c1');
+    await settle();
+
+    expect(h.asked).toHaveLength(1);
+    // **中身を見せる。** 名前だけでは判断できない。
+    expect(h.asked[0]?.text).toContain('keep-it-short の中身');
+    expect(h.deps.store.get(candidate.id)?.ask).toEqual({
+      channelId: 'c1',
+      messageId: 'm1',
+    });
+  });
+
+  it('✅ で承認し、問いかけを結果へ書き換える', async () => {
+    const h = createPromptHarness();
+    const candidate = propose(h.deps, 'keep-it-short');
+    askForSkillApproval(h.deps, candidate, 'c1');
+    await settle();
+
+    const outcome = await decideSkillByReaction(h.deps, {
+      channelId: 'c1',
+      messageId: 'm1',
+      emoji: '✅',
+      userId: 'u1',
+      userName: 'neko',
+    });
+
+    expect(outcome).toEqual({
+      kind: 'decided',
+      candidate: expect.objectContaining({ status: 'approved' }),
+    });
+    // **問いかけのまま残さない**（過去ログから二度押しされる）。
+    expect(h.settled).toHaveLength(1);
+    expect(h.settled[0]?.text).toContain('neko');
+  });
+
+  it('❌ で却下する', async () => {
+    const h = createPromptHarness();
+    const candidate = propose(h.deps, 'keep-it-short');
+    askForSkillApproval(h.deps, candidate, 'c1');
+    await settle();
+
+    await decideSkillByReaction(h.deps, {
+      channelId: 'c1',
+      messageId: 'm1',
+      emoji: '❌',
+      userId: 'u1',
+      userName: 'neko',
+    });
+
+    expect(h.deps.store.get(candidate.id)?.status).toBe('rejected');
+  });
+
+  // ただの雑談に付いた絵文字が毎回ここへ来る。
+  it('関係のない投稿への絵文字は素通しする', async () => {
+    const h = createPromptHarness();
+
+    expect(
+      await decideSkillByReaction(h.deps, {
+        channelId: 'c1',
+        messageId: 'other',
+        emoji: '✅',
+        userId: 'u1',
+        userName: 'neko',
+      }),
+    ).toEqual({ kind: 'unrelated' });
+  });
+
+  it('決まったあとに押されても、結果は変わらない', async () => {
+    const h = createPromptHarness();
+    const candidate = propose(h.deps, 'keep-it-short');
+    askForSkillApproval(h.deps, candidate, 'c1');
+    await settle();
+
+    const decide = (emoji: string) =>
+      decideSkillByReaction(h.deps, {
+        channelId: 'c1',
+        messageId: 'm1',
+        emoji,
+        userId: 'u1',
+        userName: 'neko',
+      });
+    await decide('✅');
+    const second = await decide('❌');
+
+    expect(second.kind).toBe('already-decided');
+    expect(h.deps.store.get(candidate.id)?.status).toBe('approved');
+  });
+
+  it('聞けなくても候補は残る（/skill から承認できる）', async () => {
+    const h = createPromptHarness();
+    h.deps.prompt = {
+      ask: async () => {
+        throw new Error('Discord が落ちている');
+      },
+      settle: async () => undefined,
+    };
+    const candidate = propose(h.deps, 'keep-it-short');
+    askForSkillApproval(h.deps, candidate, 'c1');
+    await settle();
+
+    expect(h.deps.store.get(candidate.id)?.status).toBe('pending');
   });
 });
