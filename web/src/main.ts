@@ -44,8 +44,17 @@ sound.addEventListener('click', () => {
       // 向かって「喋った」ことになる。
       reconnect(true);
     })
-    .catch(() => {
-      show('このブラウザでは音を鳴らせませんでした。口だけ動きます。');
+    .catch((error: unknown) => {
+      // **理由を出す。** 「鳴らせませんでした」だけだと、ブラウザが断った
+      // のか音そのものが読めなかったのかが分からず、手元に端末が無いと
+      // 追えない（実際にそれでスマートフォンの失敗を見失った）。
+      show(
+        `このブラウザでは音を鳴らせませんでした。口だけ動きます。\n${
+          error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error)
+        }`,
+      );
     });
 });
 
