@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import { buildVisemeTimeline, type Mora } from '../../domain/lipsync.ts';
 import type { SettingsProvider } from '../../domain/ports/settings-provider.ts';
 import type {
+  SpeakerStyle,
   SpeechSynthesizer,
   SynthesizedSpeech,
 } from '../../domain/ports/speech-synthesizer.ts';
@@ -113,6 +114,31 @@ export function createVoicevoxSynthesizer(
     return (await response.json()) as Record<string, unknown>;
   }
 
+  /**
+   * エンジンが持つ声を平らな一覧にする。**契約検証と設定 UI の両方から
+   * 呼ぶ** —— 同じものを 2 通りに解釈すると、UI に出ていた声を選んだのに
+   * 次の起動で落ちる、という食い違いが生まれる。
+   */
+  async function fetchStyles(
+    timeoutMs: number,
+  ): Promise<readonly SpeakerStyle[]> {
+    const body = await (
+      await request('/speakers', { method: 'GET' }, timeoutMs)
+    ).json();
+    const speakers = v.safeParse(SpeakersSchema, body);
+    if (!speakers.success) {
+      throw new Error(
+        `音声合成エンジンの /speakers を解釈できませんでした。VOICEVOX 互換 API を持つエンジンを指してください（D-05）: ${v.summarize(speakers.issues)}`,
+      );
+    }
+    return speakers.output.flatMap((speaker) =>
+      speaker.styles.map((style) => ({
+        id: style.id,
+        label: `${speaker.name}（${style.name}）`,
+      })),
+    );
+  }
+
   return {
     async synthesize(text): Promise<SynthesizedSpeech> {
       const { speakerId, speedScale, pitchScale } = input.settings.get().voice;
@@ -157,6 +183,10 @@ export function createVoicevoxSynthesizer(
       };
     },
 
+    listSpeakers(): Promise<readonly SpeakerStyle[]> {
+      return fetchStyles(CONTRACT_TIMEOUT_MS);
+    },
+
     async verifyContract(): Promise<void> {
       const { speakerId } = input.settings.get().voice;
 
@@ -164,20 +194,9 @@ export function createVoicevoxSynthesizer(
         await request('/version', { method: 'GET' }, CONTRACT_TIMEOUT_MS)
       ).text();
 
-      const speakersBody = await (
-        await request('/speakers', { method: 'GET' }, CONTRACT_TIMEOUT_MS)
-      ).json();
-      const speakers = v.safeParse(SpeakersSchema, speakersBody);
-      if (!speakers.success) {
-        throw new Error(
-          `音声合成エンジンの /speakers を解釈できませんでした。VOICEVOX 互換 API を持つエンジンを指してください（D-05）: ${v.summarize(speakers.issues)}`,
-        );
-      }
-      const style = speakers.output
-        .flatMap((speaker) =>
-          speaker.styles.map((s) => ({ speaker: speaker.name, ...s })),
-        )
-        .find((s) => s.id === speakerId);
+      const style = (await fetchStyles(CONTRACT_TIMEOUT_MS)).find(
+        (s) => s.id === speakerId,
+      );
       if (!style) {
         throw new Error(
           `設定された話者 ID ${speakerId} はこのエンジンに存在しません。settings.yaml の voice.speakerId を確認してください。`,
@@ -200,8 +219,7 @@ export function createVoicevoxSynthesizer(
         {
           engineVersion: version.replaceAll('"', ''),
           speakerId,
-          speaker: style.speaker,
-          style: style.name,
+          speaker: style.label,
         },
         'Speech synthesis engine contract verified',
       );

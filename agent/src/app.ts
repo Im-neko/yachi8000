@@ -10,6 +10,7 @@ import {
   createVoiceRuntime,
   memoryStore,
   personaDependencies,
+  settingsEditDependencies,
   settingsProvider,
   skillDependencies,
 } from './composition-root.ts';
@@ -22,6 +23,7 @@ import { registerSlashCommands } from './interfaces/discord/slash-commands.ts';
 import { createAvatarRoutes } from './interfaces/http/avatar-routes.ts';
 import { createDebugRouter } from './interfaces/http/debug-routes.ts';
 import { createNotifyRoutes } from './interfaces/http/notify-routes.ts';
+import { createSettingsRoutes } from './interfaces/http/settings-routes.ts';
 import { logger } from './observability/logger.ts';
 
 /**
@@ -118,6 +120,10 @@ app.route(
       log: logger,
     }),
     ...createAvatarRoutes(avatarDependencies),
+    // 設定 UI（F-61）。**認証は ingress 側**（→ D-37）—— この前置きは
+    // forward auth のかかった Ingress（`/`）の中にあり、素通しの
+    // `publicPaths` には載っていない。**載せてはいけない。**
+    ...createSettingsRoutes(settingsEditDependencies(voice.synthesizer)),
   ]),
 );
 

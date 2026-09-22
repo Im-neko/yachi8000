@@ -1,10 +1,19 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import * as v from 'valibot';
-import { parse as parseYaml } from 'yaml';
+import { parseDocument, parse as parseYaml } from 'yaml';
 import { AVATAR_EXPRESSIONS } from '../../domain/avatar.ts';
 import { AVATAR_GESTURES } from '../../domain/gesture.ts';
+import type {
+  SettingsEditor,
+  SettingsSaveResult,
+} from '../../domain/ports/settings-editor.ts';
 import type { SettingsProvider } from '../../domain/ports/settings-provider.ts';
-import type { Settings } from '../../domain/settings.ts';
+import {
+  type EditableSettings,
+  editableOf,
+  type Settings,
+} from '../../domain/settings.ts';
 import { logger } from '../../observability/logger.ts';
 
 const NonEmpty = v.pipe(v.string(), v.minLength(1));
@@ -124,6 +133,142 @@ export function createSettingsFileProvider(path: string): SettingsProvider {
   read();
 
   return { get: read };
+}
+
+/**
+ * 書き換える場所。**ここに並んでいない場所は触らない** —— 設定ファイルには
+ * UI が知らない節（`notification.channels`・`issueTracker`）があり、
+ * 全体を書き直すと知らないものが消える。
+ */
+const EDITABLE_PATHS = [
+  { path: ['identity', 'name'], of: (s: EditableSettings) => s.identity.name },
+  {
+    path: ['persona', 'firstPerson'],
+    of: (s: EditableSettings) => s.persona.firstPerson,
+  },
+  {
+    path: ['persona', 'personality'],
+    of: (s: EditableSettings) => s.persona.personality,
+  },
+  {
+    path: ['persona', 'speechStyle'],
+    of: (s: EditableSettings) => s.persona.speechStyle,
+  },
+  {
+    path: ['voice', 'speakerId'],
+    of: (s: EditableSettings) => s.voice.speakerId,
+  },
+  {
+    path: ['voice', 'speedScale'],
+    of: (s: EditableSettings) => s.voice.speedScale,
+  },
+  {
+    path: ['voice', 'pitchScale'],
+    of: (s: EditableSettings) => s.voice.pitchScale,
+  },
+  {
+    path: ['notification', 'whenNoOutput'],
+    of: (s: EditableSettings) => s.notification.whenNoOutput,
+  },
+  {
+    path: ['behavior', 'personaLock'],
+    of: (s: EditableSettings) => s.behavior.personaLock,
+  },
+  {
+    path: ['behavior', 'reminderPollIntervalSeconds'],
+    of: (s: EditableSettings) => s.behavior.reminderPollIntervalSeconds,
+  },
+] as const;
+
+/** `avatar` 節がある設定にだけ書ける場所。 */
+const EDITABLE_AVATAR_PATHS = [
+  {
+    path: ['avatar', 'idleExpression'],
+    of: (a: NonNullable<EditableSettings['avatar']>) => a.idleExpression,
+  },
+  {
+    path: ['avatar', 'camera', 'targetHeight'],
+    of: (a: NonNullable<EditableSettings['avatar']>) => a.camera.targetHeight,
+  },
+  {
+    path: ['avatar', 'camera', 'distance'],
+    of: (a: NonNullable<EditableSettings['avatar']>) => a.camera.distance,
+  },
+] as const;
+
+/**
+ * 設定ファイルを書き換える（F-61）。
+ *
+ * **YAML の文書として読み、決まった場所だけを差し替える。** `parse` →
+ * `stringify` で往復させると**コメントが全部消える** —— このファイルは人が
+ * 手で編集するもので、何をどう書くかの説明はコメントにしか無い。設定 UI が
+ * 一度保存しただけで手編集が成り立たなくなるのは、F-61 の「同じものを別の
+ * 入口から触る」に反する。
+ */
+export function createSettingsFileEditor(path: string): SettingsEditor {
+  function versionOf(): string {
+    return String(statSync(path).mtimeMs);
+  }
+
+  function read(): { version: string; settings: EditableSettings } {
+    // **版を先に取る。** 読んだ後に取ると、読んでから stat するまでの間の
+    // 書き込みを「自分が読んだもの」として配ってしまう。
+    const version = versionOf();
+    return {
+      version,
+      settings: editableOf(parseSettings(readFileSync(path, 'utf8'), path)),
+    };
+  }
+
+  return {
+    read,
+
+    save(version, next): SettingsSaveResult {
+      // ここから return まで await を挟まない。挟むと「読み直し → 検証 →
+      // 保存」の間に別のリクエストが割り込める（→ port のコメント）。
+      if (versionOf() !== version) return { kind: 'conflict' };
+
+      const document = parseDocument(readFileSync(path, 'utf8'));
+      if (next.avatar && !document.has('avatar')) {
+        return { kind: 'avatar-not-configured' };
+      }
+
+      for (const field of EDITABLE_PATHS) {
+        document.setIn(field.path, field.of(next));
+      }
+      if (next.avatar) {
+        for (const field of EDITABLE_AVATAR_PATHS) {
+          document.setIn(field.path, field.of(next.avatar));
+        }
+      }
+
+      // **改行で折り返させない。** 既定（80 桁）だと人格の説明のような長い
+      // 行が勝手に折られ、手で書いた形と違うものが返る。
+      const serialized = document.toString({ lineWidth: 0 });
+
+      // **書く前に、書いたものをもう一度通す。** 型は通っても設定として
+      // 成立しない値（範囲外の話速など）はここで落ちる。
+      try {
+        parseSettings(serialized, path);
+      } catch (error) {
+        return { kind: 'invalid', message: (error as Error).message };
+      }
+
+      // **同じディレクトリへ書いてから rename する。** 読む側は mtime の
+      // 変化で読み直すので、途中まで書けたファイルを読ませない。
+      const temporary = join(dirname(path), `.settings-${process.pid}.tmp`);
+      writeFileSync(temporary, serialized, 'utf8');
+      renameSync(temporary, path);
+
+      const saved = read();
+      logger.info({ path }, 'Saved the settings file');
+      return {
+        kind: 'saved',
+        version: saved.version,
+        settings: saved.settings,
+      };
+    },
+  };
 }
 
 /** テスト用。ファイルを経由せずに設定の妥当性だけを確かめる。 */

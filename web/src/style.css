@@ -83,3 +83,17 @@ body {
   line-height: 1.4;
   pointer-events: none;
 }
+
+/* 設定 UI（F-61）への入口。**画面の隅に小さく置く** —— アバターを見せる
+   ページなので、操作の要素で視界を塞がない。 */
+#settings-link {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  background: #00000099;
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  text-decoration: none;
+}

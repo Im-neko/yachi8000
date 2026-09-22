@@ -17,6 +17,7 @@ import type {
   ReminderDeliveryDependencies,
   ReminderDependencies,
 } from './application/reminder.ts';
+import type { SettingsEditDependencies } from './application/settings.ts';
 import type { SkillDependencies } from './application/skill.ts';
 import {
   createSpeechService,
@@ -46,7 +47,10 @@ import { createSqlitePersonaDiffStore } from './infrastructure/persona/sqlite-pe
 import { createJevReactionClassifier } from './infrastructure/reaction/jev-reaction-classifier.ts';
 import { createSqliteReminderStore } from './infrastructure/reminder/sqlite-reminder-store.ts';
 import { createBraveSearcher } from './infrastructure/search/brave-search.ts';
-import { createSettingsFileProvider } from './infrastructure/settings/settings-file.ts';
+import {
+  createSettingsFileEditor,
+  createSettingsFileProvider,
+} from './infrastructure/settings/settings-file.ts';
 import { createSqliteSkillStore } from './infrastructure/skill/sqlite-skill-store.ts';
 import { createVoicevoxSynthesizer } from './infrastructure/voice/voicevox-synthesizer.ts';
 import { logger } from './observability/logger.ts';
@@ -168,6 +172,27 @@ export const avatarDependencies: AvatarDependencies = {
 
 /** 設定ファイルの現在値。表示整形（Discord 側）からも読む。 */
 export const settingsProvider = settings;
+
+/**
+ * 設定 UI（F-61）が使う書き込み口。**読む口とは別の port**（→ D-44）。
+ *
+ * **これを渡すのは設定 UI のハンドラだけ。** 会話ロジック（エージェント・
+ * ツール・poller）には `settings`（読むだけ）しか渡っていない —— そうして
+ * おくことで「会話ロジックは設定ファイルへ書かない」（INV-9）が、規約では
+ * なく配線で守られる。
+ */
+const settingsEditor = createSettingsFileEditor(env.SETTINGS_PATH);
+
+/**
+ * 声の一覧を取るために音声合成エンジンが要る。エンジンのクライアントは
+ * Gateway が ready になってから作られる（`createVoiceRuntime`）ので、
+ * ここでは受け取る形にしてある。
+ */
+export function settingsEditDependencies(
+  synthesizer: SpeechSynthesizer,
+): SettingsEditDependencies {
+  return { editor: settingsEditor, synthesizer, log: logger };
+}
 
 /**
  * 発話に表情を付ける（F-24）。**鍵が無ければ作らない。**

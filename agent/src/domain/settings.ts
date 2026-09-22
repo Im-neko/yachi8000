@@ -98,3 +98,70 @@ export function personaProfileOf(settings: Settings): PersonaProfile {
     speechStyle: settings.persona.speechStyle,
   };
 }
+
+/**
+ * 設定 UI（F-61）が触れる範囲。**F-60 の表のうち「体験の定義」だけ**で、
+ * 配線に当たるものは入らない（→ D-44）。
+ *
+ * **パスを持つ項目（`avatar.vrmPath` / `avatar.gestures`）は入っていない。**
+ * 画面から書けるようにすると、`GET /api/v1/avatar/model` が設定の指す
+ * ファイルを返す作りと組み合わさって、任意のファイルを読み出せてしまう
+ * —— アバターの API がパスをリクエストで受けないのと同じ理由で外す。
+ *
+ * チャンネル ID・リポジトリ名（`notification.channels` /
+ * `issueTracker`）も外す。あれは「誰の通知がどこへ行くか」を決める配線で、
+ * 人格や声の調整とは操作の重みが違う。
+ */
+export interface EditableSettings {
+  identity: {
+    name: string;
+  };
+  persona: {
+    firstPerson: string;
+    personality: string;
+    speechStyle: string;
+  };
+  /**
+   * **設定ファイルに `avatar` 節があるときだけ入る。** 無いときに画面から
+   * 作れるようにはしていない —— 節を作るには VRM のパスが要り、それは
+   * この範囲の外にある。
+   */
+  avatar?: {
+    idleExpression: AvatarExpression;
+    camera: {
+      targetHeight: number;
+      distance: number;
+    };
+  };
+  voice: {
+    speakerId: number;
+    speedScale: number;
+    pitchScale: number;
+  };
+  notification: {
+    whenNoOutput: 'text' | 'drop';
+  };
+  behavior: {
+    personaLock: boolean;
+    reminderPollIntervalSeconds: number;
+  };
+}
+
+/** 設定から編集できる部分だけを取り出す。 */
+export function editableOf(settings: Settings): EditableSettings {
+  return {
+    identity: { name: settings.identity.name },
+    persona: { ...settings.persona },
+    ...(settings.avatar
+      ? {
+          avatar: {
+            idleExpression: settings.avatar.idleExpression,
+            camera: { ...settings.avatar.camera },
+          },
+        }
+      : {}),
+    voice: { ...settings.voice },
+    notification: { whenNoOutput: settings.notification.whenNoOutput },
+    behavior: { ...settings.behavior },
+  };
+}
