@@ -17,7 +17,7 @@ function createDeps(
       get: () =>
         ({
           web: options.speakers ? { speakers: options.speakers } : undefined,
-        }) as Settings,
+        }) as unknown as Settings,
     },
     transcriber: options.transcribe
       ? { transcribe: options.transcribe }

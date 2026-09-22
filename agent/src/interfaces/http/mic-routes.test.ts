@@ -13,7 +13,9 @@ function createHarness(
   const spoken: unknown[] = [];
   const turns: unknown[] = [];
   const voiceInput: VoiceInputDependencies = {
-    settings: { get: () => ({ web: { speakers: SPEAKERS } }) as Settings },
+    settings: {
+      get: () => ({ web: { speakers: SPEAKERS } }) as unknown as Settings,
+    },
     transcriber: {
       transcribe: options.transcribe ?? (async () => 'こんにちは'),
     },
@@ -39,7 +41,7 @@ function createHarness(
 }
 
 function post(
-  body: BodyInit,
+  body: Uint8Array,
   headers: Record<string, string> = {},
 ): RequestInit {
   return {
