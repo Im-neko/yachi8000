@@ -16,10 +16,17 @@ const INTENTS = [
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.GuildVoiceStates,
   GatewayIntentBits.DirectMessages,
+  // 承認のリアクション（F-44）。**どちらも特権インテントではない。**
+  // サーバとダイレクトメッセージで別々に要るので、片方だけだと
+  // 「DM では押せるのにサーバでは反応しない」という形で欠ける。
+  GatewayIntentBits.GuildMessageReactions,
+  GatewayIntentBits.DirectMessageReactions,
 ];
 
 /** DM は partial で届くため、チャンネルとメッセージの partial を有効にする。 */
-const PARTIALS = [Partials.Channel, Partials.Message];
+// **Reaction が要る。** 承認は数分後・数日後に押される。そのころには
+// メッセージがキャッシュに無く、partial を許さないとイベントごと届かない。
+const PARTIALS = [Partials.Channel, Partials.Message, Partials.Reaction];
 
 /**
  * 接続中の Client を globalThis に置く。

@@ -36,6 +36,43 @@ export interface SkillCandidate {
   proposedAt: string;
   /** 承認・却下・無効化した時刻。未決なら undefined。 */
   decidedAt: string | undefined;
+  /**
+   * 承認を聞いた投稿（F-44）。リアクションから候補を引き当てる鍵になる。
+   * スラッシュコマンドから提案されたもの・聞けなかったものは undefined。
+   */
+  ask: { channelId: string; messageId: string } | undefined;
+}
+
+/**
+ * 承認を聞く文面（F-44）。
+ *
+ * **中身をそのまま見せる。** 「スキルを覚えていいですか」とだけ聞かれても
+ * 判断のしようがない —— 効くのは `instructions` なので、それを読める形で
+ * 出す。人格に関わるものは全員の話し方が変わるので、種別も明示する。
+ */
+export function renderSkillApproval(candidate: SkillCandidate): string {
+  const kind =
+    candidate.kind === 'persona'
+      ? '話し方・性格に関わります（全員に効きます）'
+      : '手順・知識です';
+  return [
+    `いまのやり取りから、こういうスキルを覚えられます。覚えていいですか？`,
+    '',
+    `**${candidate.name}** — ${candidate.description}`,
+    `> ${candidate.instructions.split('\n').join('\n> ')}`,
+    '',
+    `${kind}　✅ で覚える／❌ でやめる`,
+  ].join('\n');
+}
+
+/** 決まったあとに残す文面（F-44）。**問いかけのままにしない。** */
+export function renderSkillDecision(
+  candidate: SkillCandidate,
+  decidedBy: string,
+): string {
+  const outcome =
+    candidate.status === 'approved' ? '覚えました' : '覚えないことにしました';
+  return `**${candidate.name}** — ${candidate.description}\n${outcome}（${decidedBy}）`;
 }
 
 /**

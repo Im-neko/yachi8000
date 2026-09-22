@@ -1,6 +1,10 @@
 import { defineTool } from '@flue/runtime';
 import * as v from 'valibot';
-import { listSkills, proposeSkill } from '../application/skill.ts';
+import {
+  askForSkillApproval,
+  listSkills,
+  proposeSkill,
+} from '../application/skill.ts';
 import { skillDependencies } from '../composition-root.ts';
 import type { SkillCandidate } from '../domain/skill.ts';
 
@@ -17,7 +21,15 @@ function formatCandidate(candidate: SkillCandidate): string {
  * LLM は分類と要約だけをして、書き込みは受け取った構造化された結果を
  * 決定的なコードが行う（INV-3）。
  */
-export function createSkillCuratorTools() {
+export interface SkillCuratorToolOptions {
+  /**
+   * 承認をその場で聞く先（F-44）。**どの会話から提案されたか**が分からない
+   * と聞けない。分からなければ聞かず、候補だけが残る（`/skill` から承認）。
+   */
+  channelId?: string;
+}
+
+export function createSkillCuratorTools(options: SkillCuratorToolOptions = {}) {
   const list = defineTool({
     name: 'list_skills',
     description:
@@ -64,6 +76,11 @@ export function createSkillCuratorTools() {
         instructions: data.instructions,
         kind: data.kind,
       });
+      // **その場で聞く**（F-44）。待たない —— キュレーターのターンに
+      // Discord の往復をぶら下げない。
+      if (options.channelId !== undefined) {
+        askForSkillApproval(skillDependencies, candidate, options.channelId);
+      }
       return `スキル候補 "${candidate.name}" を保留中として記録しました。承認されるまで応答には使われません。`;
     },
   });

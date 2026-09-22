@@ -17,6 +17,7 @@ import { env } from './config/env.ts';
 import { startDiscordGateway } from './infrastructure/discord/gateway.ts';
 import { createLlmProxyProvider } from './infrastructure/llm/provider.ts';
 import { registerMessageHandler } from './interfaces/discord/message-handler.ts';
+import { registerReactionHandler } from './interfaces/discord/reaction-handler.ts';
 import { registerSlashCommands } from './interfaces/discord/slash-commands.ts';
 import { createAvatarRoutes } from './interfaces/http/avatar-routes.ts';
 import { createDebugRouter } from './interfaces/http/debug-routes.ts';
@@ -51,6 +52,8 @@ await voice.synthesizer.verifyContract();
 registerMessageHandler(client, {
   speech: voice.speech,
 });
+// スキルの承認・否認（F-44）。依存は合成ルートから取るので引数は Client だけ。
+registerReactionHandler(client);
 await registerSlashCommands(client, {
   voice: voice.voiceSession,
   skills: skillDependencies,
