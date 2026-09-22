@@ -40,6 +40,27 @@ export class SettingsError extends Error {
   }
 }
 
+/**
+ * **ログインが切れていないかを先に見る。**
+ *
+ * この経路は ingress の forward auth の内側にある（→ D-37）。セッションが
+ * 切れていると、認証基盤がログイン画面へ 302 で送る —— `fetch` はそれを
+ * 黙って辿るので、**HTML を掴んだまま `ok` が真になる。** そのまま
+ * `json()` すると「Unexpected token '<'」が画面に出て、何が起きたのか
+ * 分からなくなる。
+ */
+function assertSignedIn(response: Response): void {
+  const json = response.headers
+    .get('content-type')
+    ?.includes('application/json');
+  if (response.redirected || !json) {
+    throw new SettingsError(
+      response.status,
+      'ログインが切れています。ページを読み直してください。',
+    );
+  }
+}
+
 async function failureOf(response: Response): Promise<SettingsError> {
   // **中身を読んでから投げる。** 「保存できません」だけだと、衝突なのか
   // 値が駄目なのかエンジンが落ちているのかが区別できない。
@@ -56,6 +77,7 @@ async function failureOf(response: Response): Promise<SettingsError> {
 export async function fetchSettings(): Promise<LoadedSettings> {
   const response = await fetch(SETTINGS_URL);
   if (!response.ok) throw await failureOf(response);
+  assertSignedIn(response);
   return (await response.json()) as LoadedSettings;
 }
 
@@ -66,6 +88,7 @@ export async function fetchSettings(): Promise<LoadedSettings> {
 export async function fetchSpeakers(): Promise<SpeakerStyle[]> {
   const response = await fetch(`${SETTINGS_URL}/voices`);
   if (!response.ok) throw await failureOf(response);
+  assertSignedIn(response);
   return ((await response.json()) as { speakers: SpeakerStyle[] }).speakers;
 }
 
@@ -80,6 +103,9 @@ export async function saveSettings(
     body: JSON.stringify(loaded),
   });
   if (!response.ok) throw await failureOf(response);
+  // **保存でも見る。** 切れたセッションのまま押すと、PUT が 302 で
+  // ログイン画面へ流れ、**保存されていないのに成功したように見える。**
+  assertSignedIn(response);
   return (await response.json()) as LoadedSettings;
 }
 

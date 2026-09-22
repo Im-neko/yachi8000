@@ -115,6 +115,8 @@ output {
 }
 
 footer {
+  display: flex;
+  gap: 0.75rem;
   padding-top: 1.5rem;
 }
 
@@ -127,6 +129,13 @@ button {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+}
+
+#reload {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 400;
 }
 
 button:disabled {

@@ -15,13 +15,21 @@ const formElement = document.querySelector<HTMLFormElement>('#form');
 const statusElement = document.querySelector<HTMLParagraphElement>('#status');
 const saveElement = document.querySelector<HTMLButtonElement>('#save');
 const avatarElement = document.querySelector<HTMLElement>('#avatar-section');
-if (!formElement || !statusElement || !saveElement || !avatarElement) {
+const reloadElement = document.querySelector<HTMLButtonElement>('#reload');
+if (
+  !formElement ||
+  !statusElement ||
+  !saveElement ||
+  !avatarElement ||
+  !reloadElement
+) {
   throw new Error('ページの土台が見つかりません。');
 }
 const form: HTMLFormElement = formElement;
 const status: HTMLParagraphElement = statusElement;
 const saveButton: HTMLButtonElement = saveElement;
 const avatarSection: HTMLElement = avatarElement;
+const reloadButton: HTMLButtonElement = reloadElement;
 
 function show(message: string, kind: 'info' | 'error' = 'info'): void {
   status.textContent = message;
@@ -168,6 +176,23 @@ form.addEventListener('submit', (event) => {
     })
     .finally(() => {
       saveButton.disabled = false;
+    });
+});
+
+/** 保存されている内容を取り直す。**入力中の内容は消える**ので、押されたときだけ。 */
+reloadButton.addEventListener('click', () => {
+  reloadButton.disabled = true;
+  show('読み直しています…');
+  fetchSettings()
+    .then((next) => {
+      fill(next);
+      show('読み直しました。');
+    })
+    .catch((error: unknown) => {
+      show(error instanceof Error ? error.message : String(error), 'error');
+    })
+    .finally(() => {
+      reloadButton.disabled = false;
     });
 });
 
