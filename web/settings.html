@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>yachi8000 の設定</title>
+  </head>
+  <body class="settings">
+    <main>
+      <header>
+        <h1>設定</h1>
+        <a href="/">アバターへ戻る</a>
+      </header>
+
+      <!--
+        値は読み込んでから入れる。**初期値を HTML に書かない** —— 書くと、
+        読み込みに失敗したときに「それらしい設定」が画面に残り、保存で
+        本物を上書きしてしまう。
+      -->
+      <form id="form" hidden>
+        <section>
+          <h2>名前</h2>
+          <label>
+            <span>アシスタントの名前</span>
+            <input name="identity.name" type="text" required maxlength="40" />
+          </label>
+        </section>
+
+        <section>
+          <h2>人格・口調</h2>
+          <p class="note">
+            会話を通じて変わった分はここには出ません（別の実体に積まれます）。
+          </p>
+          <label>
+            <span>一人称</span>
+            <input name="persona.firstPerson" type="text" required maxlength="40" />
+          </label>
+          <label>
+            <span>性格</span>
+            <textarea name="persona.personality" required rows="4" maxlength="2000"></textarea>
+          </label>
+          <label>
+            <span>話し方</span>
+            <textarea name="persona.speechStyle" required rows="4" maxlength="2000"></textarea>
+          </label>
+        </section>
+
+        <section id="avatar-section" hidden>
+          <h2>アバター</h2>
+          <p class="note">
+            VRM と身振りのファイルの置き場所はここからは変えられません（設定
+            ファイルを手で書き換えてください）。
+          </p>
+          <label>
+            <span>待機時の表情</span>
+            <select name="avatar.idleExpression"></select>
+          </label>
+          <label>
+            <span>注視点の高さ（m）</span>
+            <input name="avatar.camera.targetHeight" type="number" min="0" max="5" step="0.05" required />
+          </label>
+          <label>
+            <span>注視点からの距離（m）</span>
+            <input name="avatar.camera.distance" type="number" min="0.1" max="20" step="0.05" required />
+          </label>
+        </section>
+
+        <section>
+          <h2>声</h2>
+          <label>
+            <span>話者</span>
+            <select name="voice.speakerId" id="speaker"></select>
+          </label>
+          <label>
+            <span>話速 <output id="speed-value"></output></span>
+            <input name="voice.speedScale" type="range" min="0.5" max="2" step="0.05" />
+          </label>
+          <label>
+            <span>音高 <output id="pitch-value"></output></span>
+            <input name="voice.pitchScale" type="range" min="-0.15" max="0.15" step="0.01" />
+          </label>
+        </section>
+
+        <section>
+          <h2>挙動</h2>
+          <label>
+            <span>読み上げる出口が無いときの通知</span>
+            <select name="notification.whenNoOutput">
+              <option value="drop">捨てる</option>
+              <option value="text">テキストチャンネルへ回す</option>
+            </select>
+          </label>
+          <label class="checkbox">
+            <input name="behavior.personaLock" type="checkbox" />
+            <span>人格・口調を固定する（会話で変わった分を使わない）</span>
+          </label>
+          <label>
+            <span>リマインダーを確認する間隔（秒）</span>
+            <input name="behavior.reminderPollIntervalSeconds" type="number" min="5" max="3600" step="1" required />
+          </label>
+        </section>
+
+        <footer>
+          <button id="save" type="submit">保存する</button>
+          <!--
+            衝突したときの逃げ道（→ D-44 の 3）。**押すまで読み直さない** ——
+            勝手に読み直すと、入力中の内容を黙って捨てることになる。
+          -->
+          <button id="reload" type="button">読み直す</button>
+        </footer>
+      </form>
+
+      <p id="status" role="status"></p>
+    </main>
+    <script type="module" src="/src/settings-main.ts"></script>
+  </body>
+</html>

@@ -49,6 +49,7 @@ function createHarness() {
         };
       },
       verifyContract: async () => undefined,
+      listSpeakers: async () => [],
     },
     voice: {
       join: async () => undefined,

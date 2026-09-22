@@ -23,5 +23,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // **ページは 2 枚**（→ D-44）。アバターは canvas を全画面に広げ、設定は
+    // 縦に伸びるフォームで、土台のスタイルが噛み合わない。分けておくと
+    // 設定を開くために 10 MB の VRM を読む必要もない。
+    rollupOptions: {
+      input: {
+        index: 'index.html',
+        settings: 'settings.html',
+      },
+    },
   },
 });
