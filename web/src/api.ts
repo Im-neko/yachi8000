@@ -163,3 +163,43 @@ export function subscribeAvatarEvents(
 
   return () => source.close();
 }
+
+/**
+ * 話しかけた結果（F-13 の経路 B、→ D-47）。
+ *
+ * **`heard: false` は失敗ではない。** 文字起こしのエンジンは 2 秒に満たない
+ * 発話へ、エラーではなく空文字を返す（→ D-16 の追記の 3）。
+ */
+export interface UtteranceResult {
+  heard: boolean;
+  transcript: string | null;
+  reply: string | null;
+}
+
+/**
+ * 録った 1 発話を送る。
+ *
+ * **失敗したら投げる。** 黙って何も起きないのが音声入力の最悪の壊れ方で、
+ * 利用者から見て「聞こえていない」のか「無視された」のかが区別できない。
+ */
+export async function sendUtterance(
+  blob: Blob,
+  contentType: string,
+): Promise<UtteranceResult> {
+  const response = await fetch('/api/v1/mic/utterance', {
+    method: 'POST',
+    headers: { 'content-type': contentType },
+    body: blob,
+  });
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body.error === 'string') message = body.error;
+    } catch {
+      // JSON でなければ状態コードだけで伝える。
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as UtteranceResult;
+}

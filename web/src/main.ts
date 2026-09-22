@@ -1,22 +1,34 @@
 import {
   AVATAR_MODEL_URL,
   fetchAvatarConfig,
+  sendUtterance,
   speechAudioUrl,
   subscribeAvatarEvents,
 } from './api.ts';
 import { createSpeechAudio } from './audio.ts';
+import { createMicrophone } from './mic.ts';
 import { createStage } from './stage.ts';
 import './style.css';
 
 const canvasElement = document.querySelector<HTMLCanvasElement>('#stage');
 const statusElement = document.querySelector<HTMLParagraphElement>('#status');
 const soundElement = document.querySelector<HTMLButtonElement>('#sound');
-if (!canvasElement || !statusElement || !soundElement) {
+const micElement = document.querySelector<HTMLButtonElement>('#mic');
+const heardElement = document.querySelector<HTMLParagraphElement>('#heard');
+if (
+  !canvasElement ||
+  !statusElement ||
+  !soundElement ||
+  !micElement ||
+  !heardElement
+) {
   throw new Error('ページの土台が見つかりません。');
 }
 const canvas: HTMLCanvasElement = canvasElement;
 const status: HTMLParagraphElement = statusElement;
 const sound: HTMLButtonElement = soundElement;
+const mic: HTMLButtonElement = micElement;
+const heard: HTMLParagraphElement = heardElement;
 
 /**
  * 進み具合と失敗を画面に出す。
@@ -56,6 +68,78 @@ sound.addEventListener('click', () => {
         }`,
       );
     });
+});
+
+/**
+ * マイクから話しかける（F-13 の経路 B、→ D-47）。押すと録り始め、
+ * もう一度押すと送る。**押すまでマイクは開かない。**
+ *
+ * **黙って終わらせない。** 聞き取れた文も、聞き取れなかったことも、
+ * 送れなかったことも画面に出す —— 音声入力の最悪の壊れ方は「話しかけたのに
+ * 無言」で、利用者からは原因が何も分からない。
+ */
+const microphone = createMicrophone();
+
+function showHeard(message: string): void {
+  heard.textContent = message;
+}
+
+function setMicLabel(): void {
+  const recording = microphone.recording();
+  mic.dataset.recording = String(recording);
+  mic.textContent = recording ? '送る' : '話しかける';
+}
+
+async function toggleMic(): Promise<void> {
+  if (!microphone.recording()) {
+    await microphone.start();
+    setMicLabel();
+    showHeard('聞いています…');
+    return;
+  }
+
+  const recording = await microphone.stop();
+  setMicLabel();
+  if (!recording) {
+    showHeard('何も録れませんでした。');
+    return;
+  }
+
+  mic.disabled = true;
+  showHeard('聞き取っています…');
+  try {
+    const result = await sendUtterance(recording.blob, recording.contentType);
+    if (!result.heard) {
+      // 2 秒に満たない発話は文字起こしが空を返す（→ D-16 の追記の 3）。
+      // **「無言」で終わらせない。**
+      showHeard('聞き取れませんでした（短すぎたかもしれません）。');
+      return;
+    }
+    showHeard(
+      `あなた: ${result.transcript}\n${result.reply ?? '（返事なし）'}`,
+    );
+  } catch (error) {
+    showHeard(
+      `送れませんでした。\n${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    mic.disabled = false;
+  }
+}
+
+mic.addEventListener('click', () => {
+  toggleMic().catch((error: unknown) => {
+    setMicLabel();
+    mic.disabled = false;
+    // 許可されなかった場合もここへ来る。理由をそのまま出す。
+    showHeard(
+      `マイクを使えませんでした。\n${
+        error instanceof Error
+          ? `${error.name}: ${error.message}`
+          : String(error)
+      }`,
+    );
+  });
 });
 
 /** 素材の出どころ（→ D-42 の 2）。設定に無ければ何も出さない。 */

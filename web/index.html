@@ -12,7 +12,14 @@
       押されるまで hidden のままにはせず「押せる」状態で置いておく。
     -->
     <button id="sound" type="button">音を出す</button>
+    <!--
+      マイクから話しかける（F-13 の経路 B、→ D-47）。押すと録り始め、
+      もう一度押すと送る。**押すまでマイクは開かない。**
+    -->
+    <button id="mic" type="button">話しかける</button>
     <a id="settings-link" href="/settings.html">設定</a>
+    <!-- 文字起こしと返事。**黙って終わらせない**（→ INV-7 と同じ趣旨）。 -->
+    <p id="heard" role="status"></p>
     <p id="status" role="status"></p>
     <script type="module" src="/src/main.ts"></script>
   </body>

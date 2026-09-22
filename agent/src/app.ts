@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { createChannelRouter, setProvider } from '@flue/runtime';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { runAgentTurn } from './agents/run-turn.ts';
 import type { ReminderDeliveryDependencies } from './application/reminder.ts';
 import { fireDueReminders } from './application/reminder.ts';
 import {
@@ -13,6 +14,7 @@ import {
   settingsEditDependencies,
   settingsProvider,
   skillDependencies,
+  voiceInputDependencies,
 } from './composition-root.ts';
 import { env } from './config/env.ts';
 import { startDiscordGateway } from './infrastructure/discord/gateway.ts';
@@ -22,6 +24,7 @@ import { registerReactionHandler } from './interfaces/discord/reaction-handler.t
 import { registerSlashCommands } from './interfaces/discord/slash-commands.ts';
 import { createAvatarRoutes } from './interfaces/http/avatar-routes.ts';
 import { createDebugRouter } from './interfaces/http/debug-routes.ts';
+import { createMicRoutes } from './interfaces/http/mic-routes.ts';
 import { createNotifyRoutes } from './interfaces/http/notify-routes.ts';
 import { createSettingsRoutes } from './interfaces/http/settings-routes.ts';
 import { logger } from './observability/logger.ts';
@@ -124,6 +127,13 @@ app.route(
     // forward auth のかかった Ingress（`/`）の中にあり、素通しの
     // `publicPaths` には載っていない。**載せてはいけない。**
     ...createSettingsRoutes(settingsEditDependencies(voice.synthesizer)),
+    // ブラウザのマイクから話しかける（F-13 の経路 B、→ D-47）。
+    // **`/api/v1/voice/` の下に置かない** —— あの前置きは素通しにしてある。
+    ...createMicRoutes({
+      voiceInput: voiceInputDependencies,
+      speech: voice.speech,
+      runTurn: runAgentTurn,
+    }),
   ]),
 );
 

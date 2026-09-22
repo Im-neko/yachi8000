@@ -66,6 +66,15 @@ const EnvSchema = v.object({
   /** LLM プロキシの `model_list[].model_name`。起動時に実在を検証する。 */
   LLM_MODEL: v.pipe(v.string(), v.minLength(1)),
 
+  /**
+   * 文字起こしのモデル（F-13, → D-16）。同じ LLM プロキシの
+   * `model_list[].model_name` で、`mode: audio_transcription` のもの。
+   *
+   * **任意。** 未設定なら音声入力の入口が生えないだけで、会話は普通に動く
+   * （起動ログに WARN が 1 行出る）。
+   */
+  STT_MODEL: v.optional(v.pipe(v.string(), v.minLength(1))),
+
   DISCORD_BOT_TOKEN: v.pipe(v.string(), v.minLength(1)),
 
   /**

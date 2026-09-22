@@ -16,6 +16,13 @@ export type SpeechOrigin =
   /** 会話の応答（F-01, F-12）。DM には `guildId` が無い。 */
   | { readonly kind: 'conversation'; readonly guildId?: string }
   /**
+   * ブラウザから話しかけられた応答（F-13 の経路 B、→ D-47）。
+   *
+   * **VC へは出さない。** 話しかけた人は画面の前にいるので、そこへ返す。
+   * VC にいる別の人へ、その人の声の相手の返事を流す筋は無い。
+   */
+  | { readonly kind: 'web-conversation' }
+  /**
    * 外部通知（F-15）。宛先を名前で指定された通知（D-31）だけ `guildId` を持つ。
    * 宛先が無い通知は、つながっている出口すべてへ出す。
    */
@@ -51,8 +58,11 @@ export interface SpeechTargets {
  *   VC で読み上げるのは宛先として筋が通らない
  * - **ブラウザ**: 通知・リマインダー・サーバでの会話を受ける。
  *   **DM は受けない** —— 利用者は複数人いる前提で、ページを開いている人が
- *   DM の相手とは限らない。ページの利用者と話者の対応が決まるまでは、
- *   他人の DM が画面の前で読み上げられ得る（→ Q-26）
+ *   DM の相手とは限らない（→ Q-26 は D-45 で決着したが、**対応表があっても
+ *   「いま画面の前にいるのがその人か」までは分からない**ので、DM は出さない
+ *   ままにしてある）
+ * - **ブラウザから話しかけられた分**（`web-conversation`）は必ずブラウザへ。
+ *   話しかけた本人がそこにいる
  */
 export function selectSpeechTargets(
   origin: SpeechOrigin,
@@ -82,6 +92,10 @@ export function selectSpeechTargets(
         voice: inVoice && origin.guildId === availability.voiceGuildId,
         browser: browserListening && origin.guildId !== undefined,
       };
+    case 'web-conversation':
+      // **声で返すのは音を鳴らせるタブだけ。** 鳴らせなくても文字起こしと
+      // 返事は HTTP の応答で画面に出るので、ここが false でも会話は成立する。
+      return { voice: false, browser: browserListening };
   }
 }
 

@@ -38,6 +38,19 @@ export function discordDirectMessageConversationId(
 }
 
 /**
+ * ブラウザから話しかけられたときの会話（F-13 の経路 B、→ D-47）。
+ * **話者ごとに 1 つ。**
+ *
+ * **Discord の DM とは分ける。** 同じ人であっても（→ D-45）、返事の行き先が
+ * 違う —— DM の返事は Discord に残り、こちらの返事はその場で読み上げて
+ * 消える。混ぜると、声で言ったことが DM の履歴に混ざって見える。
+ */
+export function webConversationId(userId: string): ConversationId {
+  assertSnowflake(userId, 'userId');
+  return `web-${userId}` as ConversationId;
+}
+
+/**
  * キュレーターエージェント（F-40）のインスタンス ID の接頭辞。
  *
  * メインエージェントと**確実に別アドレス**になるように明示的に付ける。

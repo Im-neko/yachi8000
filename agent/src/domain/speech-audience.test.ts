@@ -64,6 +64,21 @@ describe('selectSpeechTargets', () => {
     });
   });
 
+  // D-47。話しかけた本人が画面の前にいるので、返事はそこへ返す。
+  // VC にいる別の人へ、その人の声の相手の返事を流す筋は無い。
+  it('ブラウザから話しかけられた応答はブラウザだけへ出す', () => {
+    expect(selectSpeechTargets({ kind: 'web-conversation' }, BOTH)).toEqual({
+      voice: false,
+      browser: true,
+    });
+    expect(selectSpeechTargets({ kind: 'web-conversation' }, IN_VOICE)).toEqual(
+      {
+        voice: false,
+        browser: false,
+      },
+    );
+  });
+
   // F-23。既定は消音なので、見ているだけのタブを出口と数えると、通知が
   // 無音へ向かって「喋った」ことになり、テキストへの退避も止まる。
   it('音を鳴らせると名乗っていないタブは出口に数えない', () => {
