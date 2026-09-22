@@ -23,6 +23,7 @@ import {
   createSpeechService,
   type SpeechService,
 } from './application/speech.ts';
+import type { VoiceInputDependencies } from './application/voice-input.ts';
 import type { VoiceSessionDependencies } from './application/voice-session.ts';
 import type { WebSearchDependencies } from './application/web-search.ts';
 import { env } from './config/env.ts';
@@ -52,6 +53,7 @@ import {
   createSettingsFileProvider,
 } from './infrastructure/settings/settings-file.ts';
 import { createSqliteSkillStore } from './infrastructure/skill/sqlite-skill-store.ts';
+import { createWhisperTranscriber } from './infrastructure/stt/whisper-transcriber.ts';
 import { createVoicevoxSynthesizer } from './infrastructure/voice/voicevox-synthesizer.ts';
 import { logger } from './observability/logger.ts';
 
@@ -172,6 +174,32 @@ export const avatarDependencies: AvatarDependencies = {
 
 /** 設定ファイルの現在値。表示整形（Discord 側）からも読む。 */
 export const settingsProvider = settings;
+
+/**
+ * ブラウザのマイクから話しかける経路（F-13 の経路 B、→ D-47）。
+ *
+ * **`STT_MODEL` が無ければ文字起こしを組み立てない。** 入口そのものは
+ * 生やしておき、叩かれたら 503 で「設定されていない」と言う —— 経路ごと
+ * 消すと、ページのボタンが 404 になって原因が分からなくなる。
+ */
+export const voiceInputDependencies: VoiceInputDependencies = {
+  settings,
+  transcriber: env.STT_MODEL
+    ? createWhisperTranscriber({
+        baseUrl: env.LLM_PROXY_BASE_URL,
+        apiKey: env.LLM_PROXY_API_KEY,
+        model: env.STT_MODEL,
+      })
+    : undefined,
+  log: logger,
+};
+
+if (!env.STT_MODEL) {
+  logger.warn(
+    {},
+    'Voice input is disabled — STT_MODEL is not set (the mic button will say so)',
+  );
+}
 
 /**
  * 設定 UI（F-61）が使う書き込み口。**読む口とは別の port**（→ D-44）。

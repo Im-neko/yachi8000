@@ -69,6 +69,16 @@ const SettingsSchema = v.object({
       ),
     ),
   }),
+  // 認証基盤の利用者名 → 話者 ID（→ D-45）。**値の形を狭く決める** ——
+  // 綴り違いを黙って通すと、帰属の間違った記憶が溜まる。
+  web: v.optional(
+    v.object({
+      speakers: v.record(
+        NonEmpty,
+        v.pipe(v.string(), v.regex(/^discord-user-\d+$/)),
+      ),
+    }),
+  ),
   issueTracker: v.optional(
     v.object({
       repositories: v.record(
