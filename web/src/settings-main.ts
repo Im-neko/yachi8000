@@ -2,6 +2,7 @@ import type { VrmExpressionPreset } from './api.ts';
 import {
   type EditableSettings,
   EXPRESSION_LABELS,
+  fetchMe,
   fetchSettings,
   fetchSpeakers,
   type LoadedSettings,
@@ -196,6 +197,44 @@ reloadButton.addEventListener('click', () => {
     });
 });
 
+/**
+ * いま誰として通っているかを出す（→ D-45）。
+ *
+ * **対応表に無ければ、書き足す 1 行をそのまま見せる。** 対応表は設定
+ * ファイルに手で書くもので（→ D-44）、書くには認証基盤での自分の名前が
+ * 要る —— それが分からないと「あなたが誰か分かりません」で止まる。
+ *
+ * **取れなくても設定は開く。** ここは案内であって、設定の一部ではない。
+ */
+function showMe(): void {
+  const section = document.querySelector<HTMLElement>('#identity');
+  const line = document.querySelector<HTMLParagraphElement>('#me');
+  if (!section || !line) return;
+
+  fetchMe()
+    .then((me) => {
+      if (!me.username) {
+        line.textContent =
+          '認証基盤の利用者名が届いていません（forward auth の内側で開いてください）。';
+      } else if (me.speakerId) {
+        line.textContent = `${me.username} として通っています（話者: ${me.speakerId}）。`;
+      } else {
+        line.textContent = [
+          `${me.username} として通っていますが、話者が決まっていません。`,
+          'マイクから話しかけるには、設定ファイルへこの 2 行を足してください:',
+          '',
+          'web:',
+          '  speakers:',
+          `    "${me.username}": "discord-user-<Discord のユーザー ID>"`,
+        ].join('\n');
+      }
+      section.hidden = false;
+    })
+    .catch(() => {
+      // 案内が出ないだけ。設定そのものは触れる。
+    });
+}
+
 try {
   show('設定を読み込んでいます…');
   // **声の一覧が取れないときは設定も出さない。** 話者の選択肢が無い画面で
@@ -221,6 +260,7 @@ try {
 
   fill(settings);
   form.hidden = false;
+  showMe();
   show('');
 } catch (error) {
   // 何が駄目だったかをそのまま出す。設定ファイルが置かれていないのか、
