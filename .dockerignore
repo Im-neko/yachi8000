@@ -1,0 +1,9 @@
+# ビルド文脈へ送らないもの。**イメージの中で作り直すもの**を送ると、
+# 転送が重くなるうえ、手元の状態がイメージへ紛れ込む。
+.git
+**/node_modules
+**/dist
+# ランタイム状態（会話履歴・設定・VRM）。イメージには入れない。
+agent/data
+# 顔検出の wasm は web のビルド中に node_modules から複製する（→ D-46 の 3）。
+web/public/mediapipe

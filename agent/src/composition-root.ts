@@ -9,6 +9,7 @@ import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
 import type { PersonDependencies } from './application/person.ts';
 import type { PersonaDependencies } from './application/persona.ts';
+import { createPresenceService } from './application/presence.ts';
 import {
   createReactionService,
   type ReactionService,
@@ -182,6 +183,12 @@ export const settingsProvider = settings;
  * 生やしておき、叩かれたら 503 で「設定されていない」と言う —— 経路ごと
  * 消すと、ページのボタンが 404 になって原因が分からなくなる。
  */
+/**
+ * カメラの前に人がいるか（F-26）。**ブラウザが判定した結果だけ**を持つ
+ * （→ D-46 の 1）。残さないランタイム状態。
+ */
+export const presenceService = createPresenceService(() => Date.now());
+
 export const voiceInputDependencies: VoiceInputDependencies = {
   settings,
   transcriber: env.STT_MODEL
@@ -283,6 +290,9 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
       current: () => ({
         voiceGuildId: voice.current()?.guildId,
         listeningBrowsers: avatarEvents.listeningBrowsers(),
+        // カメラが「いない」と言っているなら、ブラウザは出口に数えない
+        // （F-26、→ D-46 の 2）。「分からない」は今までどおり数える。
+        presence: presenceService.current(),
       }),
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

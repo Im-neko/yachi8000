@@ -203,3 +203,26 @@ export async function sendUtterance(
   }
   return (await response.json()) as UtteranceResult;
 }
+
+/** カメラの前に人がいるか（F-26、→ D-46）。**映像は送らない。** */
+export type Presence = 'present' | 'absent' | 'unknown';
+
+/**
+ * いまの状態をサーバへ伝える。
+ *
+ * **失敗しても投げない。** これが届かなくても、いちばん困るのは
+ * 「読み上げが止まらない」ことで、それは今までどおりの振る舞い（→ D-46 の 2
+ * で `unknown` を「今までどおり」に倒した理由と同じ）。**カメラが理由で
+ * 会話そのものが止まってはいけない。**
+ */
+export async function reportPresence(state: Presence): Promise<void> {
+  try {
+    await fetch('/api/v1/presence', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ state }),
+    });
+  } catch {
+    // 次の報告で追いつく。
+  }
+}

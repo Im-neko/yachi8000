@@ -66,6 +66,7 @@ function createHarness() {
       current: () => ({
         voiceGuildId: connected?.guildId,
         listeningBrowsers,
+        presence: 'unknown' as const,
       }),
     },
     sleep: async (ms) => {

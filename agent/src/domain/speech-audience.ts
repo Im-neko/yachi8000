@@ -1,3 +1,5 @@
+import type { Presence } from './presence.ts';
+
 /**
  * 「この発話をどの出口が受け取るか」を決める（→ D-40）。
  *
@@ -42,6 +44,13 @@ export interface OutputAvailability {
    * テキストへの退避も止まる**（INV-7 に反する。→ D-40）。
    */
   readonly listeningBrowsers: number;
+  /**
+   * カメラの前に人がいるか（F-26、→ D-46）。
+   *
+   * **「いない」ときだけブラウザを出口から外す。** 「分からない」は今まで
+   * どおり数える —— カメラを使わない人が読み上げられなくなってはいけない。
+   */
+  readonly presence: Presence;
 }
 
 /** どの出口へ出すか。両方 false なら、その発話に出口は無い。 */
@@ -63,13 +72,20 @@ export interface SpeechTargets {
  *   ままにしてある）
  * - **ブラウザから話しかけられた分**（`web-conversation`）は必ずブラウザへ。
  *   話しかけた本人がそこにいる
+ * - **カメラが「いない」と言っているブラウザは出口に数えない**（F-26）。
+ *   **「分からない」は数える** —— カメラを使わない人が読み上げられなく
+ *   なってはいけない（→ D-46 の 2）
  */
 export function selectSpeechTargets(
   origin: SpeechOrigin,
   availability: OutputAvailability,
 ): SpeechTargets {
   const inVoice = availability.voiceGuildId !== undefined;
-  const browserListening = availability.listeningBrowsers > 0;
+  // **音を鳴らせると名乗っていて、かつ人がいないと分かっていない**タブだけ
+  // を出口と数える（F-23, F-26）。画面の前に誰もいないと分かっているなら、
+  // そこへ向かって喋っても届かない —— 通知はテキストへ退避させたい。
+  const browserListening =
+    availability.listeningBrowsers > 0 && availability.presence !== 'absent';
 
   switch (origin.kind) {
     case 'notification':

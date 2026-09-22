@@ -14,11 +14,13 @@ import { mountableSkills } from '../application/skill.ts';
 import {
   personaDependencies,
   personDependencies,
+  presenceService,
   skillDependencies,
 } from '../composition-root.ts';
 import { env } from '../config/env.ts';
 import type { IssueSource } from '../domain/issue.ts';
 import { renderSpeakerSection } from '../domain/person.ts';
+import { renderPresence } from '../domain/presence.ts';
 import { parseSpeakerId } from '../domain/speaker.ts';
 import { LLM_PROVIDER_ID } from '../infrastructure/llm/provider-id.ts';
 import { logger } from '../observability/logger.ts';
@@ -248,6 +250,7 @@ export function Yachi(_props: AgentProps) {
 - Date: ${formatCurrentDateTime()} (JST, UTC+9)
 
 ${renderSpeakerSection(profile, typeof speakerName === 'string' ? speakerName : undefined)}
+${renderPresence(presenceService.current())}
 ${threadSource ? renderThreadSource(threadSource) : ''}
 ${buildPersonaPrompt(personaDependencies)}
 

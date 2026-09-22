@@ -9,15 +9,17 @@
     "npm": ">=11"
   },
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
+    "dev": "npm run copy-mediapipe && vite dev",
+    "build": "npm run copy-mediapipe && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "lint:fix": "biome check --write ."
+    "lint:fix": "biome check --write .",
+    "copy-mediapipe": "node scripts/copy-mediapipe.mjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
     "@pixiv/three-vrm": "3.5.5",
     "@pixiv/three-vrm-animation": "3.5.5",
     "three": "0.186.0"

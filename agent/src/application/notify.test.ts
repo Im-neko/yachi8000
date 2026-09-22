@@ -58,6 +58,7 @@ function createHarness(options: {
                 ? (options.guildId ?? 'g')
                 : undefined,
               listeningBrowsers: options.listeningBrowsers ?? 0,
+              presence: 'unknown',
             }),
           ),
         pending: () => 0,
