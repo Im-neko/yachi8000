@@ -153,6 +153,7 @@ function createHarness(options: {
             selectSpeechTargets(origin, {
               voiceGuildId: options.connectedTo?.guildId,
               listeningBrowsers: options.listeningBrowsers ?? 0,
+              presence: 'unknown',
             }),
           ),
         pending: () => 0,

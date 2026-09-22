@@ -1,12 +1,15 @@
 import {
   AVATAR_MODEL_URL,
   fetchAvatarConfig,
+  type Presence,
+  reportPresence,
   sendUtterance,
   speechAudioUrl,
   subscribeAvatarEvents,
 } from './api.ts';
 import { createSpeechAudio } from './audio.ts';
 import { createMicrophone } from './mic.ts';
+import { createPresenceWatcher } from './presence.ts';
 import { createStage } from './stage.ts';
 import './style.css';
 
@@ -15,12 +18,14 @@ const statusElement = document.querySelector<HTMLParagraphElement>('#status');
 const soundElement = document.querySelector<HTMLButtonElement>('#sound');
 const micElement = document.querySelector<HTMLButtonElement>('#mic');
 const heardElement = document.querySelector<HTMLParagraphElement>('#heard');
+const cameraElement = document.querySelector<HTMLButtonElement>('#camera');
 if (
   !canvasElement ||
   !statusElement ||
   !soundElement ||
   !micElement ||
-  !heardElement
+  !heardElement ||
+  !cameraElement
 ) {
   throw new Error('ページの土台が見つかりません。');
 }
@@ -29,6 +34,7 @@ const status: HTMLParagraphElement = statusElement;
 const sound: HTMLButtonElement = soundElement;
 const mic: HTMLButtonElement = micElement;
 const heard: HTMLParagraphElement = heardElement;
+const camera: HTMLButtonElement = cameraElement;
 
 /**
  * 進み具合と失敗を画面に出す。
@@ -140,6 +146,74 @@ mic.addEventListener('click', () => {
       }`,
     );
   });
+});
+
+/**
+ * カメラの前に人がいるかを見る（F-26、→ D-46）。
+ *
+ * **映像はこの端末から出ない。** 送るのは 3 値だけ。**押すまでカメラは
+ * 開かない** —— 読み上げの「音を出す」（F-23）と同じ扱い。
+ */
+const PRESENCE_HEARTBEAT_MS = 60_000;
+
+let presenceBeat: number | undefined;
+let lastPresence: Presence = 'unknown';
+
+const presence = createPresenceWatcher({
+  onChange: (state) => {
+    lastPresence = state;
+    void reportPresence(state);
+    showHeard(
+      state === 'present'
+        ? 'カメラ: 人がいます'
+        : state === 'absent'
+          ? 'カメラ: 人がいません'
+          : 'カメラ: 分かりません',
+    );
+  },
+});
+
+function setCameraLabel(): void {
+  const active = presence.active();
+  camera.dataset.active = String(active);
+  camera.textContent = active ? 'カメラを止める' : 'カメラを使う';
+}
+
+camera.addEventListener('click', () => {
+  if (presence.active()) {
+    presence.stop();
+    if (presenceBeat !== undefined) clearInterval(presenceBeat);
+    presenceBeat = undefined;
+    setCameraLabel();
+    return;
+  }
+
+  camera.disabled = true;
+  showHeard('カメラの判定器を読み込んでいます…（初回は 10MB ほど）');
+  presence
+    .start()
+    .then(() => {
+      showHeard('カメラを見ています。');
+      // **黙っている間も状態は続いている**ので、定期的に言い直す
+      // （サーバ側は古い報告を数えない → D-46）。
+      presenceBeat = window.setInterval(() => {
+        void reportPresence(lastPresence);
+      }, PRESENCE_HEARTBEAT_MS);
+    })
+    .catch((error: unknown) => {
+      // 許可されなかった場合もここへ来る。理由をそのまま出す。
+      showHeard(
+        `カメラを使えませんでした。\n${
+          error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error)
+        }`,
+      );
+    })
+    .finally(() => {
+      camera.disabled = false;
+      setCameraLabel();
+    });
 });
 
 /** 素材の出どころ（→ D-42 の 2）。設定に無ければ何も出さない。 */

@@ -6,7 +6,13 @@
     "useIgnoreFile": false
   },
   "files": {
-    "includes": ["**", "!**/dist", "!**/data", "!**/node_modules"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/data",
+      "!**/node_modules",
+      "!**/public/mediapipe"
+    ]
   },
   "formatter": {
     "enabled": true,

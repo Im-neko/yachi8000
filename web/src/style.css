@@ -120,3 +120,9 @@ body {
 #heard:empty {
   display: none;
 }
+
+/* カメラのボタン（F-26）。見ている間は分かるようにする。 */
+#camera[data-active="true"] {
+  background: #2f6f4f;
+  color: #fff;
+}

@@ -1,0 +1,3 @@
+# 顔検出の wasm は npm run copy-mediapipe が node_modules から複製する（→ D-46 の 3）。
+# 1 つ 11MB あるのでリポジトリには入れない。
+public/mediapipe/

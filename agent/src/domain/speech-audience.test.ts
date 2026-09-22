@@ -5,13 +5,24 @@ import {
   selectSpeechTargets,
 } from './speech-audience.ts';
 
-const NOBODY: OutputAvailability = { listeningBrowsers: 0 };
+const NOBODY: OutputAvailability = {
+  listeningBrowsers: 0,
+  presence: 'unknown',
+};
 const IN_VOICE: OutputAvailability = {
   voiceGuildId: 'g1',
   listeningBrowsers: 0,
+  presence: 'unknown',
 };
-const BROWSER_ONLY: OutputAvailability = { listeningBrowsers: 1 };
-const BOTH: OutputAvailability = { voiceGuildId: 'g1', listeningBrowsers: 1 };
+const BROWSER_ONLY: OutputAvailability = {
+  listeningBrowsers: 1,
+  presence: 'unknown',
+};
+const BOTH: OutputAvailability = {
+  voiceGuildId: 'g1',
+  listeningBrowsers: 1,
+  presence: 'unknown',
+};
 
 describe('selectSpeechTargets', () => {
   it('出口がひとつも無ければ、どこへも出さない', () => {
@@ -79,10 +90,45 @@ describe('selectSpeechTargets', () => {
     );
   });
 
+  // F-26。画面の前に誰もいないと分かっているなら、そこへ向かって喋っても
+  // 届かない。通知はテキストへ退避させたい（→ D-46 の 2）。
+  it('カメラが「いない」と言っているブラウザは出口に数えない', () => {
+    const empty: OutputAvailability = {
+      listeningBrowsers: 1,
+      presence: 'absent',
+    };
+    expect(selectSpeechTargets({ kind: 'notification' }, empty)).toEqual({
+      voice: false,
+      browser: false,
+    });
+  });
+
+  // **「分からない」は数える。** カメラを使わない人が読み上げられなく
+  // なってはいけない（→ D-46 の 2）。
+  it('カメラを使っていなければ、今までどおり出口に数える', () => {
+    expect(selectSpeechTargets({ kind: 'notification' }, BROWSER_ONLY)).toEqual(
+      { voice: false, browser: true },
+    );
+  });
+
+  it('カメラが「いる」と言っていれば出口に数える', () => {
+    const watching: OutputAvailability = {
+      listeningBrowsers: 1,
+      presence: 'present',
+    };
+    expect(selectSpeechTargets({ kind: 'notification' }, watching)).toEqual({
+      voice: false,
+      browser: true,
+    });
+  });
+
   // F-23。既定は消音なので、見ているだけのタブを出口と数えると、通知が
   // 無音へ向かって「喋った」ことになり、テキストへの退避も止まる。
   it('音を鳴らせると名乗っていないタブは出口に数えない', () => {
-    const watchingOnly: OutputAvailability = { listeningBrowsers: 0 };
+    const watchingOnly: OutputAvailability = {
+      listeningBrowsers: 0,
+      presence: 'unknown',
+    };
     expect(selectSpeechTargets({ kind: 'notification' }, watchingOnly)).toEqual(
       { voice: false, browser: false },
     );
