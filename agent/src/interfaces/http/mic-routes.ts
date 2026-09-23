@@ -57,15 +57,18 @@ export function createMicRoutes(
   input: MicRoutesInput,
 ): ChannelRouteDefinition[] {
   const postUtterance: ChannelRouteDefinition['handler'] = async (c) => {
-    const speaker = resolveWebSpeaker(
-      input.voiceInput,
-      c.req.header(USER_HEADER),
-    );
+    const username = c.req.header(USER_HEADER);
+    const speaker = resolveWebSpeaker(input.voiceInput, username);
     if (!speaker) {
+      // **名乗りをそのまま返す。** 対応表は手で書くもので（→ D-44）、
+      // 書くには認証基盤での自分の名前が要る。それを知る手立てが無いと、
+      // 「誰か分かりません」と言われたまま何もできない。
       return c.json(
         {
-          error:
-            'あなたが誰か分かりません。設定ファイルの web.speakers に追加してください。',
+          error: username
+            ? `${username} は設定ファイルの web.speakers にいません。`
+            : 'あなたが誰か分かりません（認証基盤の利用者名が届いていません）。',
+          username: username ?? null,
         },
         403,
       );
@@ -119,7 +122,7 @@ export function createMicRoutes(
         body: heard.text,
         attributes: {
           speakerId: speaker.speakerId,
-          speakerName: c.req.header(USER_HEADER) ?? '',
+          speakerName: username ?? '',
         },
       },
     });

@@ -25,6 +25,7 @@ import { registerReactionHandler } from './interfaces/discord/reaction-handler.t
 import { registerSlashCommands } from './interfaces/discord/slash-commands.ts';
 import { createAvatarRoutes } from './interfaces/http/avatar-routes.ts';
 import { createDebugRouter } from './interfaces/http/debug-routes.ts';
+import { createMeRoutes } from './interfaces/http/me-routes.ts';
 import { createMicRoutes } from './interfaces/http/mic-routes.ts';
 import { createNotifyRoutes } from './interfaces/http/notify-routes.ts';
 import { createPresenceRoutes } from './interfaces/http/presence-routes.ts';
@@ -136,6 +137,8 @@ app.route(
       speech: voice.speech,
       runTurn: runAgentTurn,
     }),
+    // 「いま自分は誰として通っているか」（→ D-45）。対応表を手で書くために要る。
+    ...createMeRoutes(voiceInputDependencies),
     // カメラの判定を受け取る（F-26、→ D-46）。**映像は受け取らない。**
     ...createPresenceRoutes(presenceService),
   ]),

@@ -158,3 +158,12 @@ button:disabled {
 #status:empty {
   display: none;
 }
+
+/* いま誰として通っているか（→ D-45）。書き足す行をそのまま見せるので、
+   改行と等幅を保つ。 */
+#me {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.875rem;
+  color: var(--muted);
+}

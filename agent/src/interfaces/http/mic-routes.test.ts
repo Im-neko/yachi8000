@@ -84,7 +84,7 @@ describe('createMicRoutes', () => {
     ]);
   });
 
-  it('対応表に無い人は断る', async () => {
+  it('対応表に無い人は断り、名乗りをそのまま返す', async () => {
     const { app, turns } = createHarness();
 
     const response = await app.request(
@@ -94,6 +94,8 @@ describe('createMicRoutes', () => {
 
     expect(response.status).toBe(403);
     expect(turns).toEqual([]);
+    // **対応表は手で書くもの**なので、書くために自分の名前が要る。
+    expect(await response.json()).toMatchObject({ username: 'stranger' });
   });
 
   it('利用者名が届いていなければ断る', async () => {

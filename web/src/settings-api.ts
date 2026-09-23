@@ -74,6 +74,24 @@ async function failureOf(response: Response): Promise<SettingsError> {
   return new SettingsError(response.status, message);
 }
 
+/**
+ * いま自分が誰として通っているか（→ D-45）。
+ *
+ * **対応表（`web.speakers`）は設定ファイルに手で書く**（→ D-44）。書くには
+ * 認証基盤での自分の利用者名が要るが、**それを知る手立てがどこにも無かった。**
+ */
+export interface Me {
+  username: string | null;
+  speakerId: string | null;
+}
+
+export async function fetchMe(): Promise<Me> {
+  const response = await fetch(`${SETTINGS_URL.replace(/\/settings$/, '')}/me`);
+  if (!response.ok) throw await failureOf(response);
+  assertSignedIn(response);
+  return (await response.json()) as Me;
+}
+
 export async function fetchSettings(): Promise<LoadedSettings> {
   const response = await fetch(SETTINGS_URL);
   if (!response.ok) throw await failureOf(response);
