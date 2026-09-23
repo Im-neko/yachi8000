@@ -1,6 +1,7 @@
-import type {
-  RecordedUtterance,
-  Transcriber,
+import {
+  type RecordedUtterance,
+  type Transcriber,
+  TranscriptionFailure,
 } from '../../domain/ports/transcriber.ts';
 import { logger } from '../../observability/logger.ts';
 
@@ -37,6 +38,10 @@ export function createWhisperTranscriber(
     async transcribe(utterance: RecordedUtterance): Promise<string> {
       const form = new FormData();
       form.set('model', input.model);
+      // **言語を必ず渡す。** 付けないと判定にもう 1 往復かかる（実測
+      // 1.48 秒 → 2.79 秒。→ D-48 の 4）。読み上げが VOICEVOX（日本語のみ）
+      // である以上、聞く側だけ多言語にしても噛み合わないので決め打ちにする。
+      form.set('language', 'ja');
       form.set(
         'file',
         new Blob([utterance.bytes], {
@@ -54,16 +59,28 @@ export function createWhisperTranscriber(
         body: form,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
+      if (response.status === 429) {
+        // **枠切れ。** さくらのフリープランは音声認識が 1 ヶ月 50 リクエスト
+        // で、超えると強く絞られる（実測では 3 時間空けて 1 回だけ通った
+        // → Q-29）。**数秒待っても直らない**ので、「落ちている」と同じ
+        // 言い方をしない。
+        throw new TranscriptionFailure(
+          '文字起こしの利用枠を使い切っています。',
+          'rate-limited',
+        );
+      }
       if (!response.ok) {
-        throw new Error(
+        throw new TranscriptionFailure(
           `文字起こしが失敗しました: ${response.status} ${response.statusText}`,
+          'unavailable',
         );
       }
 
       const body = (await response.json()) as { text?: unknown };
       if (typeof body.text !== 'string') {
-        throw new Error(
+        throw new TranscriptionFailure(
           '文字起こしの応答に text がありません。audio_transcription のモデルを指しているか確認してください（D-16）。',
+          'unavailable',
         );
       }
 

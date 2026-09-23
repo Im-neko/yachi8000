@@ -6,12 +6,13 @@
 
 ## 構成
 
-3 つの Deployment に分かれる。**1 つの Pod に同居させない。**
+4 つの Deployment に分かれる。**1 つの Pod に同居させない。**
 
 | Deployment | 役割 | 備考 |
 |---|---|---|
 | agent | 本体 | **レプリカ 1・`Recreate` 固定**。Gateway 接続と再生キューが単一プロセス（INV-5） |
 | voicevox | 音声合成 | 運用者が差し替えられることが要件（D-05）。タグは**必ず固定**する |
+| stt | 音声認識（faster-whisper、CPU） | **レプリカ 1・`Recreate` 固定**（重みの PVC が RWO）。`WHISPER__CPU_THREADS` を `limits.cpu` と揃えること（→ D-48） |
 | memory-db | 長期記憶（pgvector） | 専用インスタンス。共用 Postgres には相乗りしない（D-20） |
 
 agent が受け取るのは接続情報だけ:

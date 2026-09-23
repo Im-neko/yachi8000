@@ -177,6 +177,22 @@ export interface UtteranceResult {
 }
 
 /**
+ * 話しかけが断られた。
+ *
+ * **枠切れかどうかを持つ**（→ Q-29）。枠切れは**待っても直らない**ので、
+ * 一度出たら出しっぱなしにしてよい理由がここにある。
+ */
+export class UtteranceRejected extends Error {
+  constructor(
+    message: string,
+    readonly rateLimited: boolean,
+  ) {
+    super(message);
+    this.name = 'UtteranceRejected';
+  }
+}
+
+/**
  * 録った 1 発話を送る。
  *
  * **失敗したら投げる。** 黙って何も起きないのが音声入力の最悪の壊れ方で、
@@ -199,7 +215,7 @@ export async function sendUtterance(
     } catch {
       // JSON でなければ状態コードだけで伝える。
     }
-    throw new Error(message);
+    throw new UtteranceRejected(message, response.status === 429);
   }
   return (await response.json()) as UtteranceResult;
 }

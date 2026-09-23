@@ -1,7 +1,8 @@
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
-import type {
-  RecordedUtterance,
-  Transcriber,
+import {
+  type RecordedUtterance,
+  type Transcriber,
+  TranscriptionFailure,
 } from '../domain/ports/transcriber.ts';
 import { parseDiscordUserSpeaker, type SpeakerId } from '../domain/speaker.ts';
 
@@ -64,6 +65,11 @@ export type TranscriptionOutcome =
   | { kind: 'not-heard' }
   /** 文字起こしが設定されていない（`STT_MODEL` が無い）。 */
   | { kind: 'not-configured' }
+  /**
+   * 利用枠を使い切った（→ Q-29）。**数秒待っても直らない**ので、
+   * 「落ちている」とは別に扱う。
+   */
+  | { kind: 'rate-limited'; message: string }
   /** エンジンが落ちている・時間切れ（→ Q-29）。 */
   | { kind: 'unavailable'; message: string };
 
@@ -84,11 +90,16 @@ export async function transcribeUtterance(
   try {
     text = await deps.transcriber.transcribe(utterance);
   } catch (error) {
+    const rateLimited =
+      error instanceof TranscriptionFailure && error.reason === 'rate-limited';
     deps.log.warn(
-      { err: error, bytes: utterance.bytes.length },
+      { err: error, bytes: utterance.bytes.length, rateLimited },
       'Could not transcribe the utterance',
     );
-    return { kind: 'unavailable', message: (error as Error).message };
+    const message = (error as Error).message;
+    return rateLimited
+      ? { kind: 'rate-limited', message }
+      : { kind: 'unavailable', message };
   }
 
   if (text === '') {

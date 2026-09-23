@@ -6,6 +6,7 @@ import {
   sendUtterance,
   speechAudioUrl,
   subscribeAvatarEvents,
+  UtteranceRejected,
 } from './api.ts';
 import { createSpeechAudio } from './audio.ts';
 import { createMicrophone } from './mic.ts';
@@ -125,12 +126,31 @@ async function toggleMic(): Promise<void> {
       `あなた: ${result.transcript}\n${result.reply ?? '（返事なし）'}`,
     );
   } catch (error) {
+    if (error instanceof UtteranceRejected && error.rateLimited) {
+      // **枠切れは出しっぱなしにする**（→ Q-29）。数秒では戻らないので、
+      // 押すたびに同じ失敗を見せるより、押す前に分かるほうがいい。
+      showRateLimited(error.message);
+      showHeard('');
+      return;
+    }
     showHeard(
       `送れませんでした。\n${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
     mic.disabled = false;
   }
+}
+
+/**
+ * 文字起こしの枠を使い切っていることを出し続ける（→ Q-29）。
+ *
+ * **ボタンは押せるままにする。** 枠が戻ったか（契約を変えたか）は
+ * こちらからは分からないので、押して確かめられる状態を残す。
+ */
+function showRateLimited(message: string): void {
+  mic.dataset.rateLimited = 'true';
+  mic.title = message;
+  show(`${message}\nしばらく「話しかける」は通りません。`);
 }
 
 mic.addEventListener('click', () => {

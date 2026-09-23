@@ -2,6 +2,7 @@ import { createChannelRouter } from '@flue/runtime';
 import { describe, expect, it, vi } from 'vitest';
 import type { SpeechService } from '../../application/speech.ts';
 import type { VoiceInputDependencies } from '../../application/voice-input.ts';
+import { TranscriptionFailure } from '../../domain/ports/transcriber.ts';
 import type { Settings } from '../../domain/settings.ts';
 import { createMicRoutes } from './mic-routes.ts';
 
@@ -160,6 +161,24 @@ describe('createMicRoutes', () => {
     const response = await app.request('/mic/utterance', post(audio));
 
     expect(response.status).toBe(503);
+  });
+
+  it('枠を使い切っていたら 429 で「落ちている」と区別して返す', async () => {
+    const { app } = createHarness({
+      transcribe: async () => {
+        throw new TranscriptionFailure(
+          '文字起こしの利用枠を使い切っています。',
+          'rate-limited',
+        );
+      },
+    });
+
+    const response = await app.request('/mic/utterance', post(audio));
+
+    // **503 と分ける。** 待てば直ると読めてしまうと、翌月まで押し続ける
+    // ことになる（→ Q-29）。
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ rateLimited: true });
   });
 
   it('空の音声は受けない', async () => {

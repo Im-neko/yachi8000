@@ -89,6 +89,12 @@ body {
 
 /* 録っている間は見て分かるようにする —— 録音中かどうかが分からない
    作りにしない。 */
+/* 文字起こしの枠を使い切っている（→ Q-29）。押せるままにして、色で言う。 */
+#mic[data-rate-limited="true"] {
+  border-color: #ffffff1a;
+  color: #8b8f9a;
+}
+
 #mic[data-recording="true"] {
   border-color: #ff8a95;
   background: #b23b4a;
