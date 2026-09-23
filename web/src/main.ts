@@ -127,7 +127,7 @@ async function toggleMic(): Promise<void> {
     );
   } catch (error) {
     if (error instanceof UtteranceRejected && error.rateLimited) {
-      // **枠切れは出しっぱなしにする**（→ Q-29）。翌月まで戻らないので、
+      // **枠切れは出しっぱなしにする**（→ Q-29）。数秒では戻らないので、
       // 押すたびに同じ失敗を見せるより、押す前に分かるほうがいい。
       showRateLimited(error.message);
       showHeard('');
@@ -150,7 +150,7 @@ async function toggleMic(): Promise<void> {
 function showRateLimited(message: string): void {
   mic.dataset.rateLimited = 'true';
   mic.title = message;
-  show(`${message}\n「話しかける」はいま使えません。`);
+  show(`${message}\nしばらく「話しかける」は通りません。`);
 }
 
 mic.addEventListener('click', () => {

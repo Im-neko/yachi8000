@@ -66,7 +66,7 @@ export type TranscriptionOutcome =
   /** 文字起こしが設定されていない（`STT_MODEL` が無い）。 */
   | { kind: 'not-configured' }
   /**
-   * 利用枠を使い切った（→ Q-29）。**待っても直らない**ので、
+   * 利用枠を使い切った（→ Q-29）。**数秒待っても直らない**ので、
    * 「落ちている」とは別に扱う。
    */
   | { kind: 'rate-limited'; message: string }
