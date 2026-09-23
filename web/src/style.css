@@ -8,6 +8,14 @@
   box-sizing: border-box;
 }
 
+/*
+ * **縦に積むだけ。** 以前はボタンごとに `position: fixed` を書いていて、
+ * 「音を出す」と「設定」が同じ右上に重なり、マイクとカメラは位置指定が
+ * 無いまま画面いっぱいの canvas の後ろへ流れて**どの端末でも見えなかった。**
+ *
+ * 並べてしまえば重なりようがない。ボタンが折り返して 2 行になっても、
+ * canvas が縮むだけで済む（`stage.ts` は ResizeObserver で実寸を見ている）。
+ */
 html,
 body {
   margin: 0;
@@ -18,111 +26,117 @@ body {
   font-family: system-ui, sans-serif;
 }
 
-#stage {
-  display: block;
-  width: 100%;
-  height: 100%;
+body {
+  display: flex;
+  flex-direction: column;
 }
 
-/* 読み込み中と失敗の表示。**失敗を黙って隠さない**（INV-7 と同じ趣旨）。 */
-#status {
-  position: fixed;
-  inset: auto 0 0 0;
+#stage {
+  display: block;
+  /* 余った高さを全部もらう。`min-height: 0` が無いと縮まない。 */
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+/*
+ * 操作をまとめた帯（F-23, F-13, F-26, F-61）。
+ *
+ * **下端に置く。** スマートフォンでは親指の届く側。ホームバーへ潜らない
+ * よう safe-area の分だけ持ち上げる（`viewport-fit=cover` が要る）。
+ */
+#controls {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  background: #0a0c11;
+  border-top: 1px solid #ffffff1a;
+}
+
+#controls > * {
+  /* 指で押せる大きさ（44px）を下回らせない。 */
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid #ffffff33;
+  border-radius: 999px;
+  background: #1a1d26;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#controls > *:hover {
+  border-color: #ffffff66;
+}
+
+#controls button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* 鳴らせるようになったら消す（押す意味が無くなるため）。 */
+#sound[data-enabled="true"] {
+  display: none;
+}
+
+/* 録っている間は見て分かるようにする —— 録音中かどうかが分からない
+   作りにしない。 */
+#mic[data-recording="true"] {
+  border-color: #ff8a95;
+  background: #b23b4a;
+}
+
+/* カメラを見ている間も同じく。 */
+#camera[data-active="true"] {
+  border-color: #8fd6b0;
+  background: #2f6f4f;
+}
+
+/*
+ * 読み込み中と失敗（#status）と、聞き取った文と返事（#heard）。
+ * **操作の帯の上に積む。** 何も無いときは場所を取らない。
+ */
+#status,
+#heard {
+  flex: none;
   margin: 0;
-  padding: 0.75rem 1rem;
-  background: #00000099;
+  padding: 0.625rem 1rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: #000000b3;
   font-size: 0.875rem;
   line-height: 1.5;
   white-space: pre-wrap;
 }
 
-#status:empty {
+#status:empty,
+#heard:empty {
   display: none;
 }
 
 #status[data-kind="error"] {
-  background: #5a1c1ccc;
-}
-
-/*
- * 読み上げをブラウザでも鳴らすボタン（F-23）。**既定では鳴らない**ので、
- * 押せることが分かる場所に置く（→ D-39 の 3）。
- */
-#sound {
-  position: fixed;
-  inset: 1rem 1rem auto auto;
-  padding: 0.5rem 0.875rem;
-  border: 1px solid #ffffff33;
-  border-radius: 999px;
-  background: #00000099;
-  color: inherit;
-  font: inherit;
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-
-#sound:hover {
-  border-color: #ffffff66;
-}
-
-#sound[data-enabled="true"] {
-  display: none;
+  background: #5a1c1c;
 }
 
 /*
  * 素材の出どころ（→ D-42 の 2）。**ライセンスがクレジット表記を条件に
- * する素材がある**ので、控えめだが必ず読める形で出す。読み込み中の表示
- * （#status）と重ならないよう、左下ではなく左上に置く。
+ * する素材がある**ので、控えめだが必ず読める形で出す。ここだけは canvas に
+ * 重ねてよい（押すものではないため）。
  */
 #attribution {
   position: fixed;
-  inset: 1rem auto auto 1rem;
+  inset: calc(0.75rem + env(safe-area-inset-top)) auto auto 0.75rem;
   margin: 0;
   color: #ffffff99;
   font-size: 0.75rem;
   line-height: 1.4;
   pointer-events: none;
-}
-
-/* 設定 UI（F-61）への入口。**画面の隅に小さく置く** —— アバターを見せる
-   ページなので、操作の要素で視界を塞がない。 */
-#settings-link {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 0.375rem;
-  background: #00000099;
-  color: var(--foreground);
-  font-size: 0.8125rem;
-  text-decoration: none;
-}
-
-/* マイクのボタン（F-13 の経路 B）。録っている間は見て分かるようにする
-   —— 録音中かどうかが分からない作りにしない。 */
-#mic[data-recording="true"] {
-  background: #b23b4a;
-  color: #fff;
-}
-
-/* 聞き取った文と返事。#status（読み込みと失敗）とは別に出す。 */
-#heard {
-  position: fixed;
-  inset: auto 0 3rem 0;
-  margin: 0;
-  padding: 0.75rem 1rem;
-  background: #00000099;
-  font-size: 0.875rem;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-
-#heard:empty {
-  display: none;
-}
-
-/* カメラのボタン（F-26）。見ている間は分かるようにする。 */
-#camera[data-active="true"] {
-  background: #2f6f4f;
-  color: #fff;
 }
