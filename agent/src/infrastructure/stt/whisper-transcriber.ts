@@ -1,6 +1,7 @@
-import type {
-  RecordedUtterance,
-  Transcriber,
+import {
+  type RecordedUtterance,
+  type Transcriber,
+  TranscriptionFailure,
 } from '../../domain/ports/transcriber.ts';
 import { logger } from '../../observability/logger.ts';
 
@@ -54,16 +55,27 @@ export function createWhisperTranscriber(
         body: form,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
+      if (response.status === 429) {
+        // **枠切れ。** さくらのフリープランは音声認識が 1 ヶ月 50 リクエスト
+        // で、超えると翌月まで戻らない（→ Q-29）。待っても直らないので、
+        // 「落ちている」と同じ言い方をしない。
+        throw new TranscriptionFailure(
+          '文字起こしの利用枠を使い切っています。',
+          'rate-limited',
+        );
+      }
       if (!response.ok) {
-        throw new Error(
+        throw new TranscriptionFailure(
           `文字起こしが失敗しました: ${response.status} ${response.statusText}`,
+          'unavailable',
         );
       }
 
       const body = (await response.json()) as { text?: unknown };
       if (typeof body.text !== 'string') {
-        throw new Error(
+        throw new TranscriptionFailure(
           '文字起こしの応答に text がありません。audio_transcription のモデルを指しているか確認してください（D-16）。',
+          'unavailable',
         );
       }
 

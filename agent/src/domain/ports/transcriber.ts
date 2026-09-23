@@ -19,3 +19,23 @@ export interface RecordedUtterance {
 export interface Transcriber {
   transcribe(utterance: RecordedUtterance): Promise<string>;
 }
+
+/**
+ * 文字起こしが**できなかった**理由（→ Q-29）。
+ *
+ * **「枠切れ」と「落ちている」を分ける。** どちらも聞き取れない点は同じだが、
+ * 利用者に言うべきことが違う —— 前者は待っても直らず（翌月まで戻らない）、
+ * 後者は数分で戻ることがある。同じ「いま聞き取れません」にまとめると、
+ * 2026-09-22 にこちらがやったのと同じ読み違えを利用者にもさせる。
+ */
+export type TranscriptionFailureReason = 'rate-limited' | 'unavailable';
+
+export class TranscriptionFailure extends Error {
+  constructor(
+    message: string,
+    readonly reason: TranscriptionFailureReason,
+  ) {
+    super(message);
+    this.name = 'TranscriptionFailure';
+  }
+}

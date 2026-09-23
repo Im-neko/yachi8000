@@ -102,6 +102,10 @@ export function createMicRoutes(
           { error: '文字起こしが設定されていません（STT_MODEL）。' },
           503,
         );
+      case 'rate-limited':
+        // **503 にしない。** 「落ちている」と同じ扱いにすると、待てば直ると
+        // 読める（枠は翌月まで戻らない → Q-29）。状態コードでも区別する。
+        return c.json({ error: heard.message, rateLimited: true }, 429);
       case 'unavailable':
         return c.json({ error: `いま聞き取れません: ${heard.message}` }, 503);
       case 'not-heard':
