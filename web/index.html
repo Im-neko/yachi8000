@@ -2,30 +2,47 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      viewport-fit=cover にしておくと env(safe-area-inset-*) が実際の値を返す。
+      ボタンを画面の下端に並べるので、ホームバーの下へ潜らせないために要る。
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
     <title>yachi8000</title>
   </head>
   <body>
     <canvas id="stage"></canvas>
-    <!--
-      ブラウザでも読み上げを鳴らす（F-23）。既定では鳴らさないので、
-      押されるまで hidden のままにはせず「押せる」状態で置いておく。
-    -->
-    <button id="sound" type="button">音を出す</button>
-    <!--
-      マイクから話しかける（F-13 の経路 B、→ D-47）。押すと録り始め、
-      もう一度押すと送る。**押すまでマイクは開かない。**
-    -->
-    <button id="mic" type="button">話しかける</button>
-    <!--
-      カメラの前に人がいるかを見る（F-26、→ D-46）。**映像は端末から出ない。**
-      押すまでカメラは開かない。初回は判定器の読み込みに 10MB ほどかかる。
-    -->
-    <button id="camera" type="button">カメラを使う</button>
-    <a id="settings-link" href="/settings.html">設定</a>
+
     <!-- 文字起こしと返事。**黙って終わらせない**（→ INV-7 と同じ趣旨）。 -->
     <p id="heard" role="status"></p>
     <p id="status" role="status"></p>
+
+    <!--
+      操作は 1 か所にまとめる。**ばらばらに置くと重なる** —— 実際、
+      「音を出す」と「設定」が両方とも右上に載っていて、マイクとカメラは
+      位置指定が無いまま画面いっぱいの canvas の後ろへ流れて見えなかった。
+    -->
+    <nav id="controls">
+      <!--
+        ブラウザでも読み上げを鳴らす（F-23）。既定では鳴らさないので、
+        押されるまで hidden のままにはせず「押せる」状態で置いておく。
+      -->
+      <button id="sound" type="button">音を出す</button>
+      <!--
+        マイクから話しかける（F-13 の経路 B、→ D-47）。押すと録り始め、
+        もう一度押すと送る。**押すまでマイクは開かない。**
+      -->
+      <button id="mic" type="button">話しかける</button>
+      <!--
+        カメラの前に人がいるかを見る（F-26、→ D-46）。**映像は端末から出ない。**
+        押すまでカメラは開かない。初回は判定器の読み込みに 10MB ほどかかる。
+      -->
+      <button id="camera" type="button">カメラを使う</button>
+      <a id="settings-link" href="/settings.html">設定</a>
+    </nav>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
