@@ -38,6 +38,10 @@ export function createWhisperTranscriber(
     async transcribe(utterance: RecordedUtterance): Promise<string> {
       const form = new FormData();
       form.set('model', input.model);
+      // **言語を必ず渡す。** 付けないと判定にもう 1 往復かかる（実測
+      // 1.48 秒 → 2.79 秒。→ D-48 の 4）。読み上げが VOICEVOX（日本語のみ）
+      // である以上、聞く側だけ多言語にしても噛み合わないので決め打ちにする。
+      form.set('language', 'ja');
       form.set(
         'file',
         new Blob([utterance.bytes], {
