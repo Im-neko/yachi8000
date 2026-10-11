@@ -5,8 +5,7 @@ VRM を**置く**側の手順は `docs/setup/avatar.md`。ここは**作る**側
 
 ## 素材
 
-`docs/avatar/character-sheet/`（**画像は未コミット**。下の 4 ファイルをこの名前で置くこと）
-
+`docs/avatar/character-sheet/`
 | ファイル | 内容 | 使い方 |
 |---|---|---|
 | `01-front-tpose.jpg` | 正面・T ポーズの全身 | **Charakuru の入力はこれ 1 枚** |
