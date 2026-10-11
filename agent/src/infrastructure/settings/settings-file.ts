@@ -87,6 +87,15 @@ const SettingsSchema = v.object({
       ),
     }),
   ),
+  opsReview: v.optional(
+    v.object({
+      hourJst: v.optional(
+        v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(23)),
+      ),
+      channel: v.optional(ChannelName),
+      postWhenHealthy: v.optional(v.boolean()),
+    }),
+  ),
   behavior: v.object({
     personaLock: v.boolean(),
     reminderPollIntervalSeconds: v.pipe(

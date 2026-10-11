@@ -99,6 +99,15 @@ notification:
 #   repositories:
 #     "000000000000000000": owner/repository
 
+# 運用の見回り（F-53）。LOKI_URL と PROMETHEUS_URL を渡したときだけ動く。
+# 書かなければ既定（毎朝 8 時 JST・monitoring 宛・異常があったときだけ）。
+# channel は notification.channels の名前。そこに無いと配信されず WARN が出る
+# （結果は記録されるので、チャットで聞けば答える）。
+# opsReview:
+#   hourJst: 8
+#   channel: monitoring
+#   postWhenHealthy: false
+
 behavior:
   # 人格・口調固定モード（F-34）。true にすると、会話を通じて積み上がった
   # 人格の差分を応答に使わなくなる（記録自体は止めない。false に戻せば元の続きから効く）。

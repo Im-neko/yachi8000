@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { logger } from '../../observability/logger.ts';
 
 /**
- * ランタイム状態（リマインダー・スキル・人格差分・話者プロフィール）の
+ * ランタイム状態（リマインダー・スキル・人格差分・話者プロフィール・見回りの結果）の
  * SQLite（→ D-24）。
  *
  * **Flue の会話履歴 DB とは別ファイルにする。** 会話履歴は Flue ランタイムが
@@ -85,6 +85,22 @@ const SCHEMA = [
    )`,
   `CREATE INDEX IF NOT EXISTS person_notes_speaker
      ON person_notes (speaker_id, recorded_at)`,
+
+  // 運用の見回りの結果（F-53）。snapshot は翌日以降の「平常」の基準になるので、
+  // Loki の保持期間に頼らずここへ日ごとに残す。
+  `CREATE TABLE IF NOT EXISTS ops_reviews (
+     id          TEXT PRIMARY KEY,
+     reviewed_at TEXT NOT NULL,
+     status      TEXT NOT NULL,
+     severity    TEXT NOT NULL,
+     findings    TEXT NOT NULL,
+     snapshot    TEXT,
+     narration   TEXT,
+     error       TEXT,
+     notes       TEXT NOT NULL
+   )`,
+  `CREATE INDEX IF NOT EXISTS ops_reviews_at
+     ON ops_reviews (reviewed_at)`,
 ];
 
 /**

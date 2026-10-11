@@ -89,6 +89,19 @@ export interface Settings {
   issueTracker?: {
     repositories: Record<string, string>;
   };
+  /**
+   * 運用の見回り（F-53）。**任意** —— 書かなければ既定（毎朝 8 時・
+   * `monitoring` 宛・異常があったときだけ）で動く。
+   * 宛先は `notification.channels` の名前で選ぶ（→ D-31）。
+   */
+  opsReview?: {
+    /** 見回りを始める時刻（JST の時、0〜23）。 */
+    hourJst?: number;
+    /** `notification.channels` の名前。 */
+    channel?: string;
+    /** 異常が無かった日も 1 行出す。 */
+    postWhenHealthy?: boolean;
+  };
   behavior: {
     /** 人格・口調固定モード（F-34）。 */
     personaLock: boolean;
