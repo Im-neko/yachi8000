@@ -24,6 +24,7 @@ agent が受け取るのは接続情報だけ:
 | `FLUE_DB_PATH` / **`APP_DB_PATH`** / `SETTINGS_PATH` | PVC 上のパス（`/data/`） |
 | `DISCORD_BOT_TOKEN` / `LLM_PROXY_API_KEY` / `NOTIFY_TOKENS` / `MEMORY_DATABASE_URL` / **`BRAVE_SEARCH_API_KEY`** | Sealed Secret |
 | `GITHUB_TOKEN` / `JEV_API_KEY`（どちらも任意） | Sealed Secret |
+| `LOKI_URL` / `PROMETHEUS_URL`（**2 つ揃えて渡す**。任意） | チャートの values（クラスタ内の ClusterIP。認証情報は無い） |
 
 **話者 ID・話速・音高は環境変数に入れない。** 設定ファイル（`/data/settings.yaml`）側（F-60）。
 
@@ -137,6 +138,23 @@ Bot を対象サーバへ招待しておく（`docs/setup/discord-bot.md`）。�
 
 **永続状態からの自動再参加は実装しない**（2026-09-11 決定）。利用者が常に VC にいるわけではないため、
 再起動のたびに勝手に入り直すと、誰もいない VC に居座ることになる。入るタイミングは利用者が決める。
+
+## 運用の見回りを有効にする（F-53）
+
+1. **チャートの values に `LOKI_URL` と `PROMETHEUS_URL` を渡す。** 2 つ揃っていないと起動時に落ちる。どちらも無ければ見回りと調べる道具が無効なだけで、起動ログに WARN が 1 行出る
+2. **PVC 上の `/data/settings.yaml` に宛先を足す**（ArgoCD の管理外なので手で置く）。名前は `monitoring`（`opsReview.channel` で変えられる）:
+
+   ```yaml
+   notification:
+     channels:
+       monitoring:
+         guildId: "<サーバ ID>"
+         channelId: "<チャンネル ID>"
+   ```
+
+   **ここに無いと配信されず WARN が出る**（結果は記録されるので、チャットで聞けば答える）。Bot にそのチャンネルへの送信権限が要る
+3. **確認**: 起動ログに `Started the ops review scheduler`。設定の時刻（既定 8 時 JST）を過ぎていれば、起動後の最初の確認（最大 5 分）で今日の分が走り、`Ops review finished` が出る。**異常が無ければ Discord には何も出ない**（`opsReview.postWhenHealthy: true` で毎日出せる）
+4. **最初の 3 日は「学習中」。** 平常の基準が 3 日分たまるまで、ログとアクセス元の傾向は判定しない（しきい値型の確認は初日から効く）
 
 ## 通知 API を外から叩く
 

@@ -120,6 +120,17 @@ const EnvSchema = v.object({
    */
   BRAVE_SEARCH_API_KEY: v.pipe(v.string(), v.minLength(1)),
 
+  /**
+   * 運用の見回り（F-53）が読む、ログ（Loki）とメトリクス（Prometheus）の
+   * ベース URL。**読むだけ**で、認証情報は持たない（クラスタ内の ClusterIP）。
+   *
+   * **2 つ揃ったときだけ動く。** 片方だけ渡すのは設定ミスなので起動時に
+   * 落とす（半分だけ見て「異常なし」と言う状態を作らない）。どちらも無ければ
+   * 見回りと調べる道具が無効になるだけで、会話は動く（起動ログに WARN が 1 行）。
+   */
+  LOKI_URL: v.optional(v.pipe(v.string(), v.url())),
+  PROMETHEUS_URL: v.optional(v.pipe(v.string(), v.url())),
+
   /** Flue の会話履歴 SQLite。k8s では PVC 上のパスを渡す。 */
   FLUE_DB_PATH: v.optional(
     v.pipe(v.string(), v.minLength(1)),
@@ -164,6 +175,13 @@ function loadEnv(): Env {
       )
       .join('\n');
     throw new Error(`環境変数の検証に失敗しました:\n${issues}`);
+  }
+  if (
+    Boolean(result.output.LOKI_URL) !== Boolean(result.output.PROMETHEUS_URL)
+  ) {
+    throw new Error(
+      'LOKI_URL と PROMETHEUS_URL は両方渡すか、両方渡さないかのどちらかです。片方だけだと見回りが半分の情報で「異常なし」と言ってしまうため起動を中止します。',
+    );
   }
   if (result.output.ENVIRONMENT === 'production' && result.output.DEBUG_MODE) {
     throw new Error(

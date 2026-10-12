@@ -31,6 +31,8 @@ export interface CreateChatCompleterInput {
   model: string;
   /** エラー文に出す呼び出し元の名前（「通知の書き換え」など）。 */
   label: string;
+  /** 応答待ちの上限。短い一言なら既定のままでよい。長い文章は延ばす。 */
+  timeoutMs?: number;
 }
 
 /**
@@ -61,7 +63,7 @@ export function createChatCompleter(
           { role: 'user', content: user },
         ],
       }),
-      signal: AbortSignal.timeout(COMPLETION_TIMEOUT_MS),
+      signal: AbortSignal.timeout(input.timeoutMs ?? COMPLETION_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw new Error(

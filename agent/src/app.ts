@@ -3,6 +3,8 @@ import { createChannelRouter, setProvider } from '@flue/runtime';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { runAgentTurn } from './agents/run-turn.ts';
+import type { OpsReviewDependencies } from './application/ops-review.ts';
+import { runDueOpsReview } from './application/ops-review.ts';
 import type { ReminderDeliveryDependencies } from './application/reminder.ts';
 import { fireDueReminders } from './application/reminder.ts';
 import {
@@ -104,6 +106,35 @@ function startReminderPoller(deps: ReminderDeliveryDependencies): void {
 }
 
 startReminderPoller(voice.reminder);
+
+/** 見回りの時刻を過ぎていないかを見る間隔。時刻の粒度ではなく取りこぼしの上限。 */
+const OPS_REVIEW_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * 運用の見回り（F-53）。**1 日 1 回**、設定の時刻（JST）を過ぎた最初の確認で走る。
+ *
+ * 走ったかどうかは結果の DB で決まる（`isReviewDue`）ので、再起動をまたいでも
+ * 二重に走らず、止まっていた間の分は起動後の最初の確認で補う。リマインダーと
+ * 同じく 1 回ごとに次を仕込む —— 見回りが長引いても重ならない。
+ */
+function startOpsReviewScheduler(deps: OpsReviewDependencies): void {
+  async function tick(): Promise<void> {
+    try {
+      await runDueOpsReview(deps, new Date());
+    } catch (error) {
+      // 見回りの失敗は runDueOpsReview が記録して通知する。ここに来るのは
+      // その外（DB が書けない等）。止めると以後ずっと見回りが黙って消える。
+      logger.error({ err: error }, 'Ops review scheduling failed');
+    } finally {
+      setTimeout(() => void tick(), OPS_REVIEW_CHECK_INTERVAL_MS).unref();
+    }
+  }
+
+  void tick();
+  logger.info('Started the ops review scheduler');
+}
+
+if (voice.opsReview) startOpsReviewScheduler(voice.opsReview);
 
 const app = new Hono();
 app.get('/api/v1/health', (c) => c.json({ status: 'ok' }));

@@ -7,6 +7,10 @@ import {
 import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
+import type {
+  OpsReviewDependencies,
+  OpsToolDependencies,
+} from './application/ops-review.ts';
 import type { PersonDependencies } from './application/person.ts';
 import type { PersonaDependencies } from './application/persona.ts';
 import { createPresenceService } from './application/presence.ts';
@@ -42,8 +46,12 @@ import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.
 import { createGithubIssueTracker } from './infrastructure/github/github-issue-tracker.ts';
 import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
+import { createOpsNarrator } from './infrastructure/llm/ops-narrator.ts';
 import { createReminderPhraser } from './infrastructure/llm/reminder-phraser.ts';
 import { createPgvectorMemoryStore } from './infrastructure/memory/pgvector-memory-store.ts';
+import { createLokiLogSource } from './infrastructure/observability/loki-log-source.ts';
+import { createPrometheusMetricSource } from './infrastructure/observability/prometheus-metric-source.ts';
+import { createSqliteOpsReviewStore } from './infrastructure/ops/sqlite-ops-review-store.ts';
 import { createSqlitePersonProfileStore } from './infrastructure/person/sqlite-person-profile-store.ts';
 import { createSqlitePersonaDiffStore } from './infrastructure/persona/sqlite-persona-diff-store.ts';
 import { createJevReactionClassifier } from './infrastructure/reaction/jev-reaction-classifier.ts';
@@ -117,6 +125,36 @@ export const reminderDependencies: ReminderDependencies = {
 export const webSearchDependencies: WebSearchDependencies = {
   searcher: createBraveSearcher({ apiKey: env.BRAVE_SEARCH_API_KEY }),
 };
+
+const opsReviewStore = createSqliteOpsReviewStore(appDb);
+
+/**
+ * ログとメトリクスを読む口（F-53）。**2 つ揃っていなければ作らない。**
+ * 無効であることは起動時に 1 行だけ出す —— 道具を配らないので、会話の中では
+ * 「そんな道具は無い」ことになり、気付く手がかりはここしかない。
+ */
+function createOpsQueryDependencies():
+  | Pick<OpsToolDependencies, 'logs' | 'metrics'>
+  | undefined {
+  if (!env.LOKI_URL || !env.PROMETHEUS_URL) {
+    logger.warn(
+      {},
+      'Ops review is disabled — LOKI_URL / PROMETHEUS_URL are not set (no ops tools, no daily review)',
+    );
+    return undefined;
+  }
+  return {
+    logs: createLokiLogSource({ baseUrl: env.LOKI_URL }),
+    metrics: createPrometheusMetricSource({ baseUrl: env.PROMETHEUS_URL }),
+  };
+}
+
+const opsQueries = createOpsQueryDependencies();
+
+/** チャットから調べる道具が使う側。見回りの配信は poller 側の配線で足す。 */
+export const opsToolDependencies: OpsToolDependencies | undefined = opsQueries
+  ? { ...opsQueries, store: opsReviewStore }
+  : undefined;
 
 /**
  * 起票先が無い環境でも起動はできるようにする。**代わりに黙って成功しない**
@@ -266,6 +304,8 @@ export interface VoiceRuntime {
   notify: NotifyDependencies;
   /** リマインダーの発火（F-31）。VC と Discord の Client に依存する。 */
   reminder: ReminderDeliveryDependencies;
+  /** 運用の見回り（F-53）。ログとメトリクスの接続先が無ければ undefined。 */
+  opsReview: OpsReviewDependencies | undefined;
 }
 
 /**
@@ -320,6 +360,21 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
       settings,
       log: logger,
     },
+    opsReview: opsQueries
+      ? {
+          ...opsQueries,
+          store: opsReviewStore,
+          narrator: createOpsNarrator({
+            baseUrl: env.LLM_PROXY_BASE_URL,
+            apiKey: env.LLM_PROXY_API_KEY,
+            model: env.LLM_MODEL,
+            settings,
+          }),
+          text,
+          settings,
+          log: logger,
+        }
+      : undefined,
     reminder: {
       store: reminderStore,
       phraser: createReminderPhraser({
