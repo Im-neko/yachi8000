@@ -11,6 +11,7 @@ const AT = Date.UTC(2026, 9, 12, 14, 4);
 
 function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
+    id: '1',
     authorName: 'alice',
     fromAssistant: false,
     fromBot: false,

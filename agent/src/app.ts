@@ -10,6 +10,7 @@ import { fireDueReminders } from './application/reminder.ts';
 import {
   avatarDependencies,
   avatarEvents,
+  channelHistoryDependencies,
   createVoiceRuntime,
   memoryStore,
   personaDependencies,
@@ -61,6 +62,7 @@ await voice.synthesizer.verifyContract();
 
 registerMessageHandler(client, {
   speech: voice.speech,
+  ...channelHistoryDependencies,
 });
 // スキルの承認・否認（F-44）。依存は合成ルートから取るので引数は Client だけ。
 registerReactionHandler(client);

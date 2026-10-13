@@ -10,6 +10,8 @@
  * 指示ではなく読み物として囲んで渡す（INV-4）。
  */
 export interface ChannelMessage {
+  /** メッセージ ID。さらに遡るときの起点になる。 */
+  id: string;
   authorName: string;
   /** アシスタント自身の投稿か。 */
   fromAssistant: boolean;
@@ -51,33 +53,41 @@ function labelOf(message: ChannelMessage): string {
   return message.fromBot ? `${message.authorName}（Bot）` : message.authorName;
 }
 
+function lineOf(message: ChannelMessage): string {
+  return `[${jstClock(message.postedAt)}] ${labelOf(message)}: ${clip(message.text.trim(), CONTEXT_MESSAGE_MAX_CHARS)}`;
+}
+
 /**
- * 古い順に並べた発言を 1 つの文字列にする。**新しいものを優先して残す**
- * （直前の発言ほど「これ」「さっきの」の指す先になりやすい）。削った分は
- * 先頭に件数を出す。本文の無い発言は載せない。
+ * 古い順に並べた発言のうち、全体の文字数に収まる分を返す。**新しいものを優先して
+ * 残す**（直前の発言ほど「これ」「さっきの」の指す先になりやすい）。本文の無い発言は
+ * 載せない。最新の 1 件は、それ単体が上限を超えていても残す。
  */
+export function fitChannelMessages(messages: readonly ChannelMessage[]): {
+  kept: ChannelMessage[];
+  dropped: number;
+} {
+  const candidates = messages.filter((m) => m.text.trim() !== '');
+  const kept: ChannelMessage[] = [];
+  let total = 0;
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const message = candidates[i];
+    if (!message) continue;
+    const length = lineOf(message).length;
+    if (total + length > CONTEXT_TOTAL_MAX_CHARS && kept.length > 0) break;
+    kept.unshift(message);
+    total += length;
+  }
+  return { kept, dropped: candidates.length - kept.length };
+}
+
+/** 古い順の発言を、モデルに渡す 1 つの文字列にする。削った分は先頭に件数を出す。 */
 export function renderChannelContext(
   messages: readonly ChannelMessage[],
 ): string | undefined {
-  const lines = messages
-    .filter((m) => m.text.trim() !== '')
-    .map(
-      (m) =>
-        `[${jstClock(m.postedAt)}] ${labelOf(m)}: ${clip(m.text.trim(), CONTEXT_MESSAGE_MAX_CHARS)}`,
-    );
-  if (lines.length === 0) return undefined;
-
-  const kept: string[] = [];
-  let total = 0;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i] ?? '';
-    if (total + line.length > CONTEXT_TOTAL_MAX_CHARS && kept.length > 0) break;
-    kept.unshift(line);
-    total += line.length;
-  }
-  const dropped = lines.length - kept.length;
+  const { kept, dropped } = fitChannelMessages(messages);
+  if (kept.length === 0) return undefined;
   return [
     ...(dropped > 0 ? [`（これより古い ${dropped} 件は省略）`] : []),
-    ...kept,
+    ...kept.map(lineOf),
   ].join('\n');
 }

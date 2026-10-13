@@ -4,6 +4,7 @@ import {
   type AvatarPresence,
   createAvatarPresence,
 } from './application/avatar-presence.ts';
+import type { ChannelHistoryDependencies } from './application/channel-history.ts';
 import type { IssueDependencies } from './application/issue.ts';
 import type { MemoryDependencies } from './application/memory.ts';
 import type { NotifyDependencies } from './application/notify.ts';
@@ -40,6 +41,7 @@ import { createFileModelReader } from './infrastructure/avatar/file-model-reader
 import { createMemorySpeechAudioStore } from './infrastructure/avatar/memory-speech-audio-store.ts';
 import { openAppDatabase } from './infrastructure/db/app-database.ts';
 import { createDiscordApprovalPrompt } from './infrastructure/discord/approval-prompt.ts';
+import { createDiscordChannelHistory } from './infrastructure/discord/channel-history.ts';
 import { createDiscordMessageMarker } from './infrastructure/discord/message-marker.ts';
 import { createDiscordTextNotifier } from './infrastructure/discord/text-notifier.ts';
 import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.ts';
@@ -148,6 +150,14 @@ function createOpsQueryDependencies():
     metrics: createPrometheusMetricSource({ baseUrl: env.PROMETHEUS_URL }),
   };
 }
+
+/**
+ * チャンネルの発言の読み取り（D-50）。Client を持たない側（エージェントの道具）
+ * からも使えるよう、REST を直接叩く。
+ */
+export const channelHistoryDependencies: ChannelHistoryDependencies = {
+  history: createDiscordChannelHistory({ token: env.DISCORD_BOT_TOKEN }),
+};
 
 const opsQueries = createOpsQueryDependencies();
 
