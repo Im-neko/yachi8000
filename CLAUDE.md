@@ -97,7 +97,7 @@
 - `auth` には `ProviderAuth`（`{ apiKey }`）を渡す。`envApiKeyAuth()` の戻り値を直接渡すと型が合わない
 - **`npm` は 11 以上が必要。** 10 系は arborist のバグ（npm/cli#9787）で依存解決が落ちる
 - pgvector の公式イメージ（PG18）は **`/var/lib/postgresql` にマウントする**。`/var/lib/postgresql/data` へ直接マウントすると起動しない。k8s の PVC でも同じ
-- **`MESSAGE_CONTENT` は OFF のままでよい。** 実機のギルドメッセージ 1 通で確認済み（`empty content` の WARN がゼロ）
+- **`MESSAGE_CONTENT` は、連続会話の窓（D-50）を入れた時点で ON が要る。** それまでは OFF で足りた（実機のギルドメッセージ 1 通で確認済み）。窓はメンションの無い発言の本文を読むので、Portal のトグルを先に ON にしてからデプロイすること（要求だけして Portal が OFF だと Gateway 接続が落ちる）
 
 ### フェーズ 2・3 で確認済みのこと
 
@@ -348,7 +348,7 @@ npm run lint       # Biome
 ## セットアップ
 
 - **Discord Bot は yachi8000 専用に作る。** 既存の 2 つ（`discord-vc` プラグイン用 / `discord` プラグイン用）は流用しない。手順・必要な intents・scopes・権限は `docs/setup/discord-bot.md`
-- **`MESSAGE_CONTENT`（特権インテント）は、まず OFF で試す。** DM と「Bot へのメンション」は特権インテント無しでも content が読める例外で、F-01 の応答方針（DM は常に応答 / チャンネルはメンション時のみ）はちょうどその範囲に収まる。**実機で content が空でないことを確認してから OFF で確定すること**
+- **`MESSAGE_CONTENT`（特権インテント）は ON にする**（D-50）。DM と「Bot へのメンション」は特権インテント無しでも content が読める例外で、F-01 の当初の応答方針はその範囲に収まっていたが、連続会話の窓はメンションの無い発言の本文を読む。Portal のトグルを ON にしてからデプロイする
 
 ## 環境・秘密情報
 

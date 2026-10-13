@@ -2,11 +2,19 @@ import type { DeliveredMessageInput } from '@flue/runtime';
 import { type Client, Events, type Message } from 'discord.js';
 import { runAgentTurn } from '../../agents/run-turn.ts';
 import type { SpeechService } from '../../application/speech.ts';
+import { ConversationWindow } from '../../domain/conversation-window.ts';
 import { formatJstDate } from '../../domain/issue.ts';
 import { shouldRespond } from '../../domain/response-policy.ts';
 import { logger } from '../../observability/logger.ts';
 import { conversationIdOf, speakerIdOf } from './conversation.ts';
 import { splitForDiscord } from './outgoing.ts';
+
+/**
+ * 返信した相手が、この時間のうちに同じチャンネルで続けて書けば、メンション無しでも
+ * 応答する（D-50）。返信のたびに開き直す。
+ */
+const CONVERSATION_WINDOW_MS = 10 * 60 * 1000;
+const conversationWindow = new ConversationWindow(CONVERSATION_WINDOW_MS);
 
 export interface MessageHandlerDependencies {
   speech: SpeechService;
@@ -70,9 +78,18 @@ async function handleMessage(
     );
   }
 
+  const speakerId = speakerIdOf(message);
   const respond = shouldRespond({
     isDirectMessage: message.channel.isDMBased(),
     mentionsAssistant,
+    inConversationWindow: conversationWindow.isOpen(
+      message.channelId,
+      speakerId,
+      Date.now(),
+    ),
+    mentionsSomeoneElse: message.mentions.users.some(
+      (user) => user.id !== botId,
+    ),
     authorIsBot: message.author.bot,
     hasText: text !== '',
   });
@@ -85,7 +102,7 @@ async function handleMessage(
     body: text,
     attributes: {
       // 正規化してから渡す（F-05）。生のスノーフレークを上の層へ漏らさない。
-      speakerId: speakerIdOf(message),
+      speakerId,
       speakerName: message.author.displayName,
       channelId: message.channelId,
       // リマインダーの発火先を決めるのに使う（F-31）。DM には載らない。
@@ -121,6 +138,11 @@ async function handleMessage(
     // 引用が積み上がって読みにくい。
     await (first ? message.reply(chunk) : channel.send(chunk));
     first = false;
+  }
+
+  // DM は窓が要らない（常に応答する）。サーバのチャンネルだけ開く。
+  if (message.inGuild()) {
+    conversationWindow.open(message.channelId, speakerId, Date.now());
   }
 
   // **どの出口へ出すかは発話側が決める**（→ D-40）。ここは「どこから来た
