@@ -2,6 +2,10 @@ import type { DeliveredMessageInput } from '@flue/runtime';
 import { type Client, Events, type Message } from 'discord.js';
 import { runAgentTurn } from '../../agents/run-turn.ts';
 import type { SpeechService } from '../../application/speech.ts';
+import {
+  type ChannelMessage,
+  renderChannelContext,
+} from '../../domain/channel-context.ts';
 import { ConversationWindow } from '../../domain/conversation-window.ts';
 import { formatJstDate } from '../../domain/issue.ts';
 import { shouldRespond } from '../../domain/response-policy.ts';
@@ -15,6 +19,15 @@ import { splitForDiscord } from './outgoing.ts';
  */
 const CONVERSATION_WINDOW_MS = 10 * 60 * 1000;
 const conversationWindow = new ConversationWindow(CONVERSATION_WINDOW_MS);
+
+/**
+ * チャンネルごとの、アシスタントが最後に返信したメッセージの ID。会話の履歴には
+ * そこまでが入っているので、文脈に足すのはこれより後の発言だけにする。
+ * 再起動で消える —— そのときは直近の発言を少し重ねて渡すだけで、困らない。
+ */
+const lastReplyIdByChannel = new Map<string, string>();
+const CHANNEL_CONTEXT_FETCH = 15;
+const CHANNEL_CONTEXT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface MessageHandlerDependencies {
   speech: SpeechService;
@@ -58,6 +71,67 @@ async function threadSourceOf(
   }
 }
 
+/** 本文と、embed の見出し・説明・項目（Alertmanager などはこちらに書く）。 */
+function textOf(message: Message): string {
+  const embeds = message.embeds.map((embed) =>
+    [
+      embed.title,
+      embed.description,
+      ...embed.fields.map((field) => `${field.name}: ${field.value}`),
+    ]
+      .filter((part): part is string => !!part)
+      .join('\n'),
+  );
+  return [message.content, ...embeds].filter((part) => part !== '').join('\n');
+}
+
+/**
+ * このチャンネルで、アシスタントの最後の返信より後の発言（D-50）。
+ *
+ * 会話の履歴にはアシスタントが宛てられたやりとりしか入らない。自分から出した
+ * 投稿（見回り・リマインダー・通知）や他の人・Bot の発言を渡さないと、「ここで
+ * 23% って」と言われても何のことか分からない。
+ *
+ * **取れなかったら文脈なしで続ける**が、黙らない（INV-7）。読み取りの権限が
+ * 足りないときなどに落ちる。
+ */
+async function channelContextOf(
+  message: Message,
+  botId: string,
+): Promise<string | undefined> {
+  if (!message.inGuild()) return undefined;
+  const cursor = lastReplyIdByChannel.get(message.channelId);
+  const oldest = Date.now() - CHANNEL_CONTEXT_MAX_AGE_MS;
+  try {
+    const fetched = await message.channel.messages.fetch({
+      limit: CHANNEL_CONTEXT_FETCH,
+      before: message.id,
+    });
+    const recent: ChannelMessage[] = [...fetched.values()]
+      .filter(
+        (m) =>
+          !m.system &&
+          m.createdTimestamp >= oldest &&
+          (cursor === undefined || BigInt(m.id) > BigInt(cursor)),
+      )
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .map((m) => ({
+        authorName: m.member?.displayName ?? m.author.displayName,
+        fromAssistant: m.author.id === botId,
+        fromBot: m.author.bot,
+        postedAt: m.createdTimestamp,
+        text: textOf(m),
+      }));
+    return renderChannelContext(recent);
+  } catch (error) {
+    logger.warn(
+      { err: error, channelId: message.channelId },
+      'Could not read the recent messages of the channel — continuing without the channel context',
+    );
+    return undefined;
+  }
+}
+
 async function handleMessage(
   client: Client<true>,
   message: Message,
@@ -96,6 +170,7 @@ async function handleMessage(
   if (!respond) return;
 
   const conversationId = conversationIdOf(message);
+  const channelContext = await channelContextOf(message, botId);
   const delivered: DeliveredMessageInput = {
     kind: 'signal',
     type: 'discord.message',
@@ -109,6 +184,8 @@ async function handleMessage(
       ...(message.inGuild() ? { guildId: message.guildId } : {}),
       // スレッドの中なら、その元投稿。Issue の出典に使う（F-37）。
       ...((await threadSourceOf(message)) ?? {}),
+      // 直近の発言のうち、会話の履歴に入っていないもの（D-50）。
+      ...(channelContext === undefined ? {} : { channelContext }),
     },
   };
 
@@ -133,12 +210,15 @@ async function handleMessage(
   }
 
   let first = true;
+  let lastSent: Message | undefined;
   for (const chunk of splitForDiscord(reply)) {
     // 1 通目だけ返信にする。以降を返信にすると同じメッセージへの
     // 引用が積み上がって読みにくい。
-    await (first ? message.reply(chunk) : channel.send(chunk));
+    lastSent = await (first ? message.reply(chunk) : channel.send(chunk));
     first = false;
   }
+  // 次の文脈は、この返信より後の発言から取る。
+  if (lastSent) lastReplyIdByChannel.set(message.channelId, lastSent.id);
 
   // DM は窓が要らない（常に応答する）。サーバのチャンネルだけ開く。
   if (message.inGuild()) {

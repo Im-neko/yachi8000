@@ -186,6 +186,47 @@ describe('runOpsReview', () => {
     expect(record.findings[0]?.detail).toContain('db/data 93%');
   });
 
+  it('5xx の比率の項目に、返している upstream を添える', async () => {
+    const { deps } = createDeps({
+      logs: createLogs({
+        'sum by (status)': [
+          sample({ status: '200' }, 700),
+          sample({ status: '502' }, 300),
+        ],
+        'sum by (upstream, status)': [
+          sample({ upstream: 'web-api-80', status: '500' }, 20),
+          sample({ upstream: 'nginx-nginx-80', status: '502' }, 280),
+        ],
+      }),
+    });
+
+    const record = await runOpsReview(deps, NOW);
+
+    const finding = record.findings.find((f) => f.id === 'status-5xx');
+    expect(finding?.detail).toContain(
+      '返している upstream: nginx-nginx-80（502）280 件、web-api-80（500）20 件',
+    );
+  });
+
+  it('upstream の内訳が取れなくても 5xx の項目は残し、注記に出す', async () => {
+    const { deps } = createDeps({
+      logs: createLogs({
+        'sum by (status)': [
+          sample({ status: '200' }, 700),
+          sample({ status: '502' }, 300),
+        ],
+        'sum by (upstream, status)': new Error('loki down'),
+      }),
+    });
+
+    const record = await runOpsReview(deps, NOW);
+
+    expect(record.findings.map((f) => f.id)).toContain('status-5xx');
+    expect(record.notes.join()).toContain(
+      '5xx を返している upstream を取れなかった',
+    );
+  });
+
   it('エラー行の急増を挙げ、代表的なエラー行を添える', async () => {
     const { deps } = createDeps({
       store: createFakeStore(fiveQuietDays()),
