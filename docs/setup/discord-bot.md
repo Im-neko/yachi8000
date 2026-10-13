@@ -36,11 +36,11 @@ Developer Portal の **Bot → Privileged Gateway Intents** で切り替える�
 | `GUILD_MESSAGE_REACTIONS` | `1 << 10` | **スキル承認のリアクション**（F-44）。サーバのチャンネル側 |
 | `DIRECT_MESSAGE_REACTIONS` | `1 << 13` | 同上の **DM** 側。**片方だけだと「DM では押せるのにサーバでは反応しない」** |
 
-### 特権インテント — **おそらく不要**
+### 特権インテント — **`MESSAGE_CONTENT` は必要**（D-50）
 
 | Intent | 値 | 判断 |
 |---|---|---|
-| `MESSAGE_CONTENT` | `1 << 15` | **まず OFF で試す。** 下記の理由により、この設計では不要な可能性が高い |
+| `MESSAGE_CONTENT` | `1 << 15` | **ON にする**（D-50）。連続会話の窓がメンションの無い発言の本文を読むため。**Portal のトグルを先に ON にしてからデプロイすること**（要求だけして Portal が OFF だと Gateway 接続が `Used disallowed intents` で落ちる）。窓を入れる前は下記の理由で OFF で足りた |
 | `GUILD_MEMBERS` | `1 << 1` | **不要。** 表示名は REST（`GET /guilds/{id}/members/{user_id}`）で取れる |
 
 **`MESSAGE_CONTENT` が不要と見込む根拠**（公式ドキュメントの原文）:

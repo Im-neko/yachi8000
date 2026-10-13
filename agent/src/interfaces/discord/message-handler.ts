@@ -1,14 +1,26 @@
 import type { DeliveredMessageInput } from '@flue/runtime';
 import { type Client, Events, type Message } from 'discord.js';
 import { runAgentTurn } from '../../agents/run-turn.ts';
+import {
+  type ChannelHistoryDependencies,
+  recentChannelContext,
+} from '../../application/channel-history.ts';
 import type { SpeechService } from '../../application/speech.ts';
+import { ConversationWindow } from '../../domain/conversation-window.ts';
 import { formatJstDate } from '../../domain/issue.ts';
 import { shouldRespond } from '../../domain/response-policy.ts';
 import { logger } from '../../observability/logger.ts';
 import { conversationIdOf, speakerIdOf } from './conversation.ts';
 import { splitForDiscord } from './outgoing.ts';
 
-export interface MessageHandlerDependencies {
+/**
+ * 返信した相手が、この時間のうちに同じチャンネルで続けて書けば、メンション無しでも
+ * 応答する（D-50）。返信のたびに開き直す。
+ */
+const CONVERSATION_WINDOW_MS = 10 * 60 * 1000;
+const conversationWindow = new ConversationWindow(CONVERSATION_WINDOW_MS);
+
+export interface MessageHandlerDependencies extends ChannelHistoryDependencies {
   speech: SpeechService;
 }
 
@@ -50,6 +62,33 @@ async function threadSourceOf(
   }
 }
 
+/**
+ * このチャンネルの直近数時間の発言（D-50）。サーバのチャンネルだけ —— DM は
+ * 会話の履歴がそのままやりとりなので足さない。
+ *
+ * **取れなかったら文脈なしで続ける**が、黙らない（INV-7）。読み取りの権限が
+ * 足りないときなどに落ちる。
+ */
+async function channelContextOf(
+  message: Message,
+  deps: ChannelHistoryDependencies,
+): Promise<string | undefined> {
+  if (!message.inGuild()) return undefined;
+  try {
+    return await recentChannelContext(deps, {
+      channelId: message.channelId,
+      beforeMessageId: message.id,
+      now: Date.now(),
+    });
+  } catch (error) {
+    logger.warn(
+      { err: error, channelId: message.channelId },
+      'Could not read the recent messages of the channel — continuing without the channel context',
+    );
+    return undefined;
+  }
+}
+
 async function handleMessage(
   client: Client<true>,
   message: Message,
@@ -70,28 +109,40 @@ async function handleMessage(
     );
   }
 
+  const speakerId = speakerIdOf(message);
   const respond = shouldRespond({
     isDirectMessage: message.channel.isDMBased(),
     mentionsAssistant,
+    inConversationWindow: conversationWindow.isOpen(
+      message.channelId,
+      speakerId,
+      Date.now(),
+    ),
+    mentionsSomeoneElse: message.mentions.users.some(
+      (user) => user.id !== botId,
+    ),
     authorIsBot: message.author.bot,
     hasText: text !== '',
   });
   if (!respond) return;
 
   const conversationId = conversationIdOf(message);
+  const channelContext = await channelContextOf(message, deps);
   const delivered: DeliveredMessageInput = {
     kind: 'signal',
     type: 'discord.message',
     body: text,
     attributes: {
       // 正規化してから渡す（F-05）。生のスノーフレークを上の層へ漏らさない。
-      speakerId: speakerIdOf(message),
+      speakerId,
       speakerName: message.author.displayName,
       channelId: message.channelId,
       // リマインダーの発火先を決めるのに使う（F-31）。DM には載らない。
       ...(message.inGuild() ? { guildId: message.guildId } : {}),
       // スレッドの中なら、その元投稿。Issue の出典に使う（F-37）。
       ...((await threadSourceOf(message)) ?? {}),
+      // 直近の発言のうち、会話の履歴に入っていないもの（D-50）。
+      ...(channelContext === undefined ? {} : { channelContext }),
     },
   };
 
@@ -121,6 +172,11 @@ async function handleMessage(
     // 引用が積み上がって読みにくい。
     await (first ? message.reply(chunk) : channel.send(chunk));
     first = false;
+  }
+
+  // DM は窓が要らない（常に応答する）。サーバのチャンネルだけ開く。
+  if (message.inGuild()) {
+    conversationWindow.open(message.channelId, speakerId, Date.now());
   }
 
   // **どの出口へ出すかは発話側が決める**（→ D-40）。ここは「どこから来た

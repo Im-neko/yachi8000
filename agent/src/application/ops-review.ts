@@ -73,6 +73,13 @@ const SYSTEMD_UNIT = /\.(service|scope|socket|timer|mount)$/;
 const CLIENT_IP_QUERY = `topk(50, sum by (ip) (count_over_time(${INGRESS_SELECTOR} | regexp \`^(?P<ip>[0-9a-fA-F:.]+) - \` | ip != "" [24h])))`;
 const STATUS_QUERY = `sum by (status) (count_over_time(${INGRESS_SELECTOR} | regexp \`"[A-Z]+ [^"]*" (?P<status>[0-9]{3}) \` | status != "" [24h]))`;
 
+/**
+ * 5xx の発生元（ingress の upstream 名 = `<namespace>-<service>-<port>`）。
+ * アクセスログは `... <status> <bytes> "<referer>" "<ua>" <len> <time> [<upstream>] [<alt>] ...`。
+ */
+const SERVER_ERROR_SOURCE_QUERY = `topk(5, sum by (upstream, status) (count_over_time(${INGRESS_SELECTOR} | regexp \`"[A-Z]+ [^"]*" (?P<status>5[0-9]{2}) .*? \\[(?P<upstream>[^\\]]+)\\] \\[\` | status != "" [24h])))`;
+const SERVER_ERROR_SOURCES = 5;
+
 export interface OpsLogger {
   info(context: Record<string, unknown>, message: string): void;
   warn(context: Record<string, unknown>, message: string): void;
@@ -391,6 +398,42 @@ async function attachEvidence(
 }
 
 /**
+ * 5xx の比率の項目に、どの upstream が返しているかを足す。「23% と言われても
+ * どこが出しているのか分からない」を、見回りの側で答えておく。取れなくても
+ * 項目は残す。
+ */
+async function attachServerErrorSources(
+  deps: OpsQueryDependencies,
+  findings: OpsFinding[],
+  now: Date,
+  notes: string[],
+): Promise<void> {
+  const finding = findings.find((f) => f.id === 'status-5xx');
+  if (!finding) return;
+  try {
+    const samples = await deps.logs.metric({
+      logql: SERVER_ERROR_SOURCE_QUERY,
+      at: now,
+    });
+    const sources = samples
+      .filter((s) => s.labels.upstream)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, SERVER_ERROR_SOURCES)
+      .map(
+        (s) =>
+          `${label(s, 'upstream')}（${label(s, 'status')}）${Math.round(s.value)} 件`,
+      );
+    if (sources.length > 0) {
+      finding.detail = `${finding.detail}。返している upstream: ${sources.join('、')}`;
+    }
+  } catch (error) {
+    notes.push(
+      `5xx を返している upstream を取れなかった（${(error as Error).message}）`,
+    );
+  }
+}
+
+/**
  * 同じ種類の項目が溢れた日に、本文が項目の羅列で埋まらないようにする。
  * 重いものから残し、削った数は注記に出す（黙って落とさない）。
  */
@@ -459,6 +502,7 @@ export async function runOpsReview(
       notes,
     );
     await attachEvidence(deps, findings, now, notes);
+    await attachServerErrorSources(deps, findings, now, notes);
   } else {
     notes.push('ログの集計が揃わなかったため、今日の分は平常の基準に残さない');
   }

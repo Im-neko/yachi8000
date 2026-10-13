@@ -16,7 +16,7 @@
 | 4.5 | スレッドから Issue 起票（F-37） | 実装済み・**デプロイ済み（実機未確認）** |
 | 6 | アバター（F-20〜F-25, F-61, F-62） | **デプロイ済み**（映す + 口が動く + ブラウザでも鳴る + 表情 + 身振り + 設定 UI）。身振りは素材（VRMA）が未配置で、置くまで出ない |
 | 7 | 音声入力（F-13, F-14）+ カメラ（F-26） | **経路 B（ブラウザのマイク）の 1 段目とカメラをデプロイ済み**（`version: 575421b`）。手動のボタンで 1 発話を送り、**文字起こしはクラスタ内の faster-whisper**（→ D-48）。実機で端から端まで疎通済み。**常時聞き取り（VAD）は未着手。引き伸ばしは不要になった** |
-| 8 | 運用の見回り（F-53）。家とクラスタのログ・メトリクスを読み、毎日異常を `monitoring` に通知し、チャットで様子を答える | **実装済み・未デプロイ**（実データで空運転済み）。**クラスタ側の前提（`LOKI_URL` / `PROMETHEUS_URL`、PVC 上の `notification.channels.monitoring`）は未反映** → `docs/setup/deploy.md`。家のスタックのクラスタへの一本化は方針のみ（→ D-49 の 7） |
+| 8 | 運用の見回り（F-53）。家とクラスタのログ・メトリクスを読み、毎日異常を `monitoring` に通知し、チャットで様子を答える | **デプロイ済み**（`version: 4f9b9bd`、2026-10-12。起動直後の見回りが `completed` で終わり、文面（narrator）も生成された）。**`monitoring` の宛先（PVC 上の `notification.channels.monitoring`）が未設定の間は、結果は記録されるだけで Discord に出ない**（WARN `Ops review not delivered`）→ `docs/setup/deploy.md`。家のスタックはクラスタへ一本化済み（→ D-49 の 7） |
 
 **⚠ フェーズ 3.5・4 は載ってはいるが、まだ使われていない。** 起動（`version: f6cc2bd`）とポーラーの開始は確認済みだが、**リマインダーの着信・`/skill`・`/persona`・キュレーターの発火は誰も踏んでいない。** 最初に触ったときに壊れている可能性が一番高いのはそこ。
 
@@ -97,7 +97,7 @@
 - `auth` には `ProviderAuth`（`{ apiKey }`）を渡す。`envApiKeyAuth()` の戻り値を直接渡すと型が合わない
 - **`npm` は 11 以上が必要。** 10 系は arborist のバグ（npm/cli#9787）で依存解決が落ちる
 - pgvector の公式イメージ（PG18）は **`/var/lib/postgresql` にマウントする**。`/var/lib/postgresql/data` へ直接マウントすると起動しない。k8s の PVC でも同じ
-- **`MESSAGE_CONTENT` は OFF のままでよい。** 実機のギルドメッセージ 1 通で確認済み（`empty content` の WARN がゼロ）
+- **`MESSAGE_CONTENT` は、連続会話の窓（D-50）を入れた時点で ON が要る。** それまでは OFF で足りた（実機のギルドメッセージ 1 通で確認済み）。窓はメンションの無い発言の本文を読むので、Portal のトグルを先に ON にしてからデプロイすること（要求だけして Portal が OFF だと Gateway 接続が落ちる）
 
 ### フェーズ 2・3 で確認済みのこと
 
@@ -348,7 +348,7 @@ npm run lint       # Biome
 ## セットアップ
 
 - **Discord Bot は yachi8000 専用に作る。** 既存の 2 つ（`discord-vc` プラグイン用 / `discord` プラグイン用）は流用しない。手順・必要な intents・scopes・権限は `docs/setup/discord-bot.md`
-- **`MESSAGE_CONTENT`（特権インテント）は、まず OFF で試す。** DM と「Bot へのメンション」は特権インテント無しでも content が読める例外で、F-01 の応答方針（DM は常に応答 / チャンネルはメンション時のみ）はちょうどその範囲に収まる。**実機で content が空でないことを確認してから OFF で確定すること**
+- **`MESSAGE_CONTENT`（特権インテント）は ON にする**（D-50）。DM と「Bot へのメンション」は特権インテント無しでも content が読める例外で、F-01 の当初の応答方針はその範囲に収まっていたが、連続会話の窓はメンションの無い発言の本文を読む。Portal のトグルを ON にしてからデプロイする
 
 ## 環境・秘密情報
 

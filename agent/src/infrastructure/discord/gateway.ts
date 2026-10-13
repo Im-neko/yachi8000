@@ -2,11 +2,12 @@ import { Client, Events, GatewayIntentBits, Partials } from 'discord.js';
 import { logger } from '../../observability/logger.ts';
 
 /**
- * MESSAGE_CONTENT（特権インテント）は要求しない。
+ * MESSAGE_CONTENT（特権インテント）を要求する。**Portal でも ON にしておくこと。**
+ * 要求だけして Portal が OFF だと、Gateway 接続が `Used disallowed intents` で落ちる。
  *
- * DM と「Bot 宛のメンション」は特権インテント無しでも本文が読める例外で、
- * F-01 の応答方針（DM は常に応答 / チャンネルはメンション時のみ）は
- * ちょうどその範囲に収まる。
+ * DM と「Bot 宛のメンション」は特権インテント無しでも本文が読める例外だが、
+ * 連続会話の窓（D-50）はメンションの無い発言の本文を読む必要がある。
+ * 本文を読んでも、応答するのは DM・メンション・窓の中だけ（F-01）。
  *
  * GuildVoiceStates は `/vc-join` を引数なしで使えるようにするために要る
  * （呼んだ人が今いる VC を見る）。特権インテントではない。
@@ -16,6 +17,7 @@ const INTENTS = [
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.GuildVoiceStates,
   GatewayIntentBits.DirectMessages,
+  GatewayIntentBits.MessageContent,
   // 承認のリアクション（F-44）。**どちらも特権インテントではない。**
   // サーバとダイレクトメッセージで別々に要るので、片方だけだと
   // 「DM では押せるのにサーバでは反応しない」という形で欠ける。
