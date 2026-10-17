@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createWikiJsSource } from './wikijs-source.ts';
+import { createWikiJsClient } from './wikijs-source.ts';
 
-const source = createWikiJsSource({
+const source = createWikiJsClient({
   baseUrl: 'http://wiki.example/',
   apiKey: 'test-key',
 });
@@ -26,7 +26,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('createWikiJsSource', () => {
+describe('createWikiJsClient', () => {
   it('検索は GraphQL を POST し、認証ヘッダを付けてヒットを返す', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       json({
