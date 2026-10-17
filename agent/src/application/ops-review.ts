@@ -35,7 +35,6 @@ import type {
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
 import type { TextNotifier } from '../domain/ports/text-notifier.ts';
 import { investigateSurges } from './ops-investigation.ts';
-
 import {
   ACCESS_LINE,
   ERROR_WORDS,
@@ -53,6 +52,7 @@ import {
   sliceRange,
   WINDOW_MS,
 } from './ops-log-queries.ts';
+import { investigateRestarts } from './ops-restart-investigation.ts';
 
 /** 日次の見回りの既定。設定ファイルの `opsReview` で上書きできる。 */
 const DEFAULT_HOUR_JST = 8;
@@ -509,6 +509,24 @@ async function attachEvidence(
   }
 }
 
+/** 再起動の項目に調書を付ける。付けられなくても項目は残す（数えた事実の側は欠けない）。 */
+async function attachRestartDossier(
+  deps: Pick<OpsReviewDependencies, 'logs' | 'metrics' | 'log'>,
+  findings: OpsFinding[],
+  now: Date,
+  notes: string[],
+): Promise<void> {
+  try {
+    await investigateRestarts(deps, findings, now);
+  } catch (error) {
+    deps.log.warn(
+      { err: error },
+      'Failed to investigate the container restarts — reporting the count only',
+    );
+    notes.push('再起動の調べがつかなかった（数だけ載せた）');
+  }
+}
+
 /**
  * 調書のある項目に、原因の見立て（推測）を添える。**1 回の呼び出しで、ループは持たない。**
  * 付けられなくても項目は残す —— 事実の側（調書）は欠けない。
@@ -699,6 +717,7 @@ export async function runOpsReview(
       },
       notes,
     );
+    await attachRestartDossier(deps, findings, now, notes);
     await attachEvidence(deps, findings, now, notes);
     await attachServerErrorSources(deps, findings, now, notes);
     await attachHypotheses(deps, findings, now, notes);

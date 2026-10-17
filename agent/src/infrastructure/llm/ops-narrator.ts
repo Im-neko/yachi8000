@@ -1,8 +1,5 @@
-import { maskSecrets } from '../../domain/ops.ts';
-import {
-  renderDossierFacts,
-  renderHypothesis,
-} from '../../domain/ops-investigation.ts';
+import { findingFacts, maskSecrets } from '../../domain/ops.ts';
+import { renderHypothesis } from '../../domain/ops-investigation.ts';
 import type { OpsNarrator } from '../../domain/ports/ops-narrator.ts';
 import type { SettingsProvider } from '../../domain/ports/settings-provider.ts';
 import {
@@ -61,14 +58,19 @@ export function createOpsNarrator(input: CreateOpsNarratorInput): OpsNarrator {
       const { persona } = input.settings.get();
       const data = {
         day: material.day,
-        findings: material.findings.map((f) => ({
-          severity: f.severity,
-          title: f.title,
-          detail: f.detail,
-          evidence: f.evidence,
-          facts: f.dossier ? renderDossierFacts(f.dossier) : undefined,
-          hypothesis: f.hypothesis ? renderHypothesis(f.hypothesis) : undefined,
-        })),
+        findings: material.findings.map((f) => {
+          const facts = findingFacts(f);
+          return {
+            severity: f.severity,
+            title: f.title,
+            detail: f.detail,
+            evidence: f.evidence,
+            facts: facts.length > 0 ? facts : undefined,
+            hypothesis: f.hypothesis
+              ? renderHypothesis(f.hypothesis)
+              : undefined,
+          };
+        }),
         notes: material.notes,
       };
 

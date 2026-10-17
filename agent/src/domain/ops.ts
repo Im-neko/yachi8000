@@ -8,6 +8,8 @@
 import { JST_OFFSET_MS } from './jst.ts';
 import type { OpsDossier, OpsHypothesis } from './ops-investigation.ts';
 import { renderDossierFacts, renderHypothesis } from './ops-investigation.ts';
+import type { RestartDossier } from './ops-restart-investigation.ts';
+import { renderRestartFacts } from './ops-restart-investigation.ts';
 
 export type OpsSeverity = 'notice' | 'warning' | 'critical';
 export type OpsOverall = OpsSeverity | 'ok';
@@ -34,6 +36,8 @@ export interface OpsFinding {
   evidence?: string[];
   /** 急増の原因調査（F-54）で数えた事実。急増の上位だけに付く。 */
   dossier?: OpsDossier;
+  /** 再起動の原因調査（F-54）で数えた事実。`metric:restarts` だけに付く。 */
+  restartDossier?: RestartDossier;
   /** 調書を読んだ LLM の見立て。**推測**であり、事実とは分けて出す。 */
   hypothesis?: OpsHypothesis;
 }
@@ -403,6 +407,16 @@ export function overallLabel(overall: OpsOverall): string {
   return `${emoji} ${text}`;
 }
 
+/** 項目に付いた調書から、事実の行を取り出す。調書が無ければ空。 */
+export function findingFacts(finding: OpsFinding): string[] {
+  return [
+    ...(finding.dossier ? renderDossierFacts(finding.dossier) : []),
+    ...(finding.restartDossier
+      ? renderRestartFacts(finding.restartDossier)
+      : []),
+  ];
+}
+
 /** 言葉にできなかったときの、事実だけの本文。 */
 export function renderFindingsText(findings: readonly OpsFinding[]): string {
   if (findings.length === 0) return '気になる点は見つかりませんでした。';
@@ -411,9 +425,7 @@ export function renderFindingsText(findings: readonly OpsFinding[]): string {
       [
         `- ${f.title}`,
         `  ${f.detail}`,
-        ...(f.dossier ? renderDossierFacts(f.dossier) : []).map(
-          (x) => `  ${x}`,
-        ),
+        ...findingFacts(f).map((x) => `  ${x}`),
         ...(f.hypothesis ? [`  ${renderHypothesis(f.hypothesis)}`] : []),
       ].join('\n'),
     )

@@ -994,3 +994,80 @@ describe('急増の原因調査（F-54）', () => {
     expect(text).toContain('（推測・確度は低い）上流が落ちているようです。');
   });
 });
+
+describe('再起動の原因調査（F-54）', () => {
+  const RESTARTS =
+    'increase(kube_pod_container_status_restarts_total[24h]) > 0.5';
+  const crashAt = (second: number) =>
+    (NOW.getTime() - 3 * 3_600_000 + second * 1000) / 1000;
+  const containers = ['a', 'b', 'c'];
+
+  function restartMetrics(failTimestamps = false) {
+    const terminated = containers.map((pod, i) => ({
+      labels: { namespace: 'kube-system', pod, container: pod },
+      value: crashAt(i),
+    }));
+    return {
+      instant: async ({ promql }: { promql: string }) => {
+        if (promql.includes('last_terminated_timestamp')) {
+          if (failTimestamps) throw new Error('Prometheus が応答しない');
+          return terminated;
+        }
+        if (promql.includes('last_terminated_reason')) {
+          return containers.map((pod) => ({
+            labels: {
+              namespace: 'kube-system',
+              pod,
+              container: pod,
+              reason: 'Error',
+            },
+            value: 1,
+          }));
+        }
+        if (promql === RESTARTS) {
+          return containers.map((pod) => ({
+            labels: { namespace: 'kube-system', pod, container: pod },
+            value: 3,
+          }));
+        }
+        return [];
+      },
+    };
+  }
+
+  it('再起動の項目に調書が付き、事実が言葉にする側へ渡る', async () => {
+    const narrate = vi.fn(
+      async (_material: OpsNarrationMaterial) => '本文です',
+    );
+    const { deps } = createDeps({
+      metrics: restartMetrics(),
+      narrator: { narrate },
+    });
+
+    const record = await runOpsReview(deps, NOW);
+
+    const restarts = record.findings.find((f) => f.id === 'metric:restarts');
+    expect(restarts?.restartDossier?.clusters[0]?.containers).toBe(3);
+    const narrated = narrate.mock.calls[0]?.[0].findings.find(
+      (f) => f.id === 'metric:restarts',
+    );
+    expect(narrated?.restartDossier).toBeDefined();
+  });
+
+  it('調べられなくても再起動の項目は残し、WARN と注記を出す', async () => {
+    const { deps, log } = createDeps({ metrics: restartMetrics(true) });
+
+    const record = await runOpsReview(deps, NOW);
+
+    const restarts = record.findings.find((f) => f.id === 'metric:restarts');
+    expect(restarts).toBeDefined();
+    expect(restarts?.restartDossier).toBeUndefined();
+    expect(record.notes).toContain(
+      '再起動の調べがつかなかった（数だけ載せた）',
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      expect.stringContaining('investigate the container restarts'),
+    );
+  });
+});
