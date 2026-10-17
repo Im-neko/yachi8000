@@ -12,6 +12,19 @@ const CompletionSchema = v.object({
   ),
 });
 
+/** 長すぎる結果。呼び出し側は、短くするよう頼んで 1 度だけ撮り直せる。 */
+export class CompletionTooLongError extends Error {
+  constructor(
+    label: string,
+    readonly length: number,
+  ) {
+    super(
+      `${label}の結果が長すぎます（${length} 文字）。読み上げ文として扱えません。`,
+    );
+    this.name = 'CompletionTooLongError';
+  }
+}
+
 export interface CompleteInput {
   /** 役割と出力規則。人格の指定もここに含めて渡す。 */
   system: string;
@@ -83,9 +96,7 @@ export function createChatCompleter(
       throw new Error(`${input.label}の結果が空でした。`);
     }
     if (text.length > maxLength) {
-      throw new Error(
-        `${input.label}の結果が長すぎます（${text.length} 文字）。読み上げ文として扱えません。`,
-      );
+      throw new CompletionTooLongError(input.label, text.length);
     }
     return text;
   };
