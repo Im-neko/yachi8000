@@ -18,6 +18,8 @@ export interface TimelineSlice {
 export interface DominantPattern {
   /** 正規化したログ行の型。 */
   pattern: string;
+  /** 行数を数えた識別語（元の行にそのまま現れる語）。 */
+  token: string;
   /** ピーク区間のエラー行のうち、この型の識別語を含む行の割合（0〜1）。 */
   share: number;
 }
@@ -97,13 +99,23 @@ const PLACEHOLDER_WORDS = new Set(['time', 'uuid']);
 
 /**
  * 型（正規化した行）から、行数を数えるための識別語を 1 つ選ぶ。
- * 数字は正規化で潰れているので、英字と `_` だけでできた一番長い語を使う。
- * 短すぎる語は他の行にも出るので、5 文字未満は選ばない。
+ * 英字と `_` だけでできた一番長い語を使う。短すぎる語は他の行にも出るので、
+ * 5 文字未満は選ばない。
+ *
+ * **元の行（`sample`）に、そのまま現れる語だけを選ぶ。** 正規化は数字を `N` に
+ * 置き換えるので、`v1beta1` が `vNbeta N` のように化けた語は、どの行にも無い。
+ * それで数えると 0 件になり、「0% の型」「直前には無かった行」と誤って言い切る。
  */
-export function distinctiveToken(pattern: string): string | undefined {
+export function distinctiveToken(
+  pattern: string,
+  sample: string,
+): string | undefined {
   const words = pattern.match(/[A-Za-z_]{5,}/g) ?? [];
   return words
-    .filter((word) => !PLACEHOLDER_WORDS.has(word.toLowerCase()))
+    .filter(
+      (word) =>
+        !PLACEHOLDER_WORDS.has(word.toLowerCase()) && sample.includes(word),
+    )
     .sort((a, b) => b.length - a.length)[0];
 }
 

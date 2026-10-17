@@ -755,6 +755,8 @@ function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
 
+const DISCORD_MESSAGE_LIMIT = 2_000;
+
 /** Discord へ出す本文。**マスクは出口で必ず通す。** */
 export function composeReviewMessage(record: OpsReviewRecord): string {
   const day = jstDay(new Date(record.reviewedAt));
@@ -771,12 +773,17 @@ export function composeReviewMessage(record: OpsReviewRecord): string {
     ].join('\n');
   const notes =
     record.notes.length > 0 ? `\n（${record.notes.join(' / ')}）` : '';
-  return truncate(
-    maskSecrets(
-      `${overallLabel(record.severity)} 日次レビュー ${day}\n${body}${notes}`,
-    ),
-    2_000,
+  // 長さの上限で削るのは本文だけ。注記には「他に N 件ある」「見立てを付けられなかった」
+  // など、報告が欠けたことを伝えるものが入る。本文と一緒に切り捨てない（INV-7）。
+  const header = maskSecrets(
+    `${overallLabel(record.severity)} 日次レビュー ${day}\n`,
   );
+  const footer = maskSecrets(notes);
+  const room = Math.max(
+    0,
+    DISCORD_MESSAGE_LIMIT - header.length - footer.length,
+  );
+  return `${header}${truncate(maskSecrets(body), room)}${footer}`;
 }
 
 /** 見回りの結果をチャンネルへ出す。出せなくても記録は残る。 */

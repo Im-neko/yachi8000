@@ -812,6 +812,26 @@ describe('composeReviewMessage', () => {
     });
     expect(message.length).toBeLessThanOrEqual(2000);
   });
+
+  it('上限で削るのは本文だけ。報告が欠けたことを伝える注記は切り捨てない', () => {
+    const message = composeReviewMessage({
+      id: '1',
+      reviewedAt: NOW.toISOString(),
+      status: 'completed',
+      severity: 'warning',
+      findings: [],
+      narration: 'あ'.repeat(5000),
+      notes: [
+        'error-surge は他に 4 件あり、重い順に 8 件だけ載せた',
+        '原因の見立ては付けられなかった（数えた事実だけ載せた）',
+      ],
+    });
+
+    expect(message.length).toBeLessThanOrEqual(2000);
+    expect(message).toContain('他に 4 件あり');
+    expect(message).toContain('原因の見立ては付けられなかった');
+    expect(message).toContain('…');
+  });
 });
 
 describe('queryLogLines', () => {

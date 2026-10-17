@@ -249,6 +249,62 @@ describe('investigateSurges', () => {
     expect(finding.dossier?.gaps).toContain('代表パターンの割合（Loki 500）');
   });
 
+  it('代表パターンの識別語が元の行に無い（数字に隣り合う語）なら、0% と言わず、取れなかったことにする', async () => {
+    const { logs } = floodDay({
+      lines: async () => [
+        { timestamp: '1', labels: {}, line: 'x v1beta1 ab cd' },
+      ],
+    });
+    const finding = surge();
+
+    await investigateSurges(
+      { logs, metrics: NO_METRICS },
+      {
+        surges: [finding],
+        sliceCounts: { [SOURCE]: FLOODED_SLICES },
+        history: HISTORY,
+        now: NOW,
+      },
+      [],
+    );
+
+    expect(finding.dossier?.dominant).toBeUndefined();
+    expect(finding.dossier?.gaps).toContain('代表パターンの割合');
+  });
+
+  it('始まりの直前の行は、始まりより前の範囲を別に引く（後ろの騒がしい行に押し出されない）', async () => {
+    const ranges: Array<{ start: number; end: number }> = [];
+    const base = floodDay();
+    const { logs } = floodDay({
+      lines: async (query) => {
+        if (query.logql.includes('!= `smsdvb_do_tune`')) {
+          ranges.push({
+            start: query.start.getTime(),
+            end: query.end.getTime(),
+          });
+        }
+        return base.logs.lines(query);
+      },
+    });
+    const finding = surge();
+
+    await investigateSurges(
+      { logs, metrics: NO_METRICS },
+      {
+        surges: [finding],
+        sliceCounts: { [SOURCE]: FLOODED_SLICES },
+        history: HISTORY,
+        now: NOW,
+      },
+      [],
+    );
+
+    const onset = new Date(finding.dossier?.onset ?? '').getTime();
+    expect(ranges).toHaveLength(2);
+    expect(ranges[0]?.end).toBe(onset);
+    expect(ranges[1]?.start).toBe(onset);
+  });
+
   it('急増が特定の区間に集中していなければ、その旨を残す', async () => {
     const { logs } = floodDay();
     const finding = surge();

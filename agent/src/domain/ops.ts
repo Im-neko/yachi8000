@@ -368,6 +368,8 @@ export function normalizeLogLine(line: string): string {
 export interface LogPattern {
   pattern: string;
   count: number;
+  /** この型で最初に見た元の行（正規化していない）。 */
+  sample: string;
 }
 
 /** 行を正規化して数え、多い順に `top` 種類だけ返す。 */
@@ -375,14 +377,16 @@ export function groupLogPatterns(
   lines: readonly string[],
   top: number,
 ): LogPattern[] {
-  const counts = new Map<string, number>();
+  const groups = new Map<string, { count: number; sample: string }>();
   for (const line of lines) {
     const key = normalizeLogLine(line);
     if (key === '') continue;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const group = groups.get(key);
+    if (group) group.count++;
+    else groups.set(key, { count: 1, sample: line });
   }
-  return [...counts.entries()]
-    .map(([pattern, count]) => ({ pattern, count }))
+  return [...groups.entries()]
+    .map(([pattern, { count, sample }]) => ({ pattern, count, sample }))
     .sort((a, b) => b.count - a.count)
     .slice(0, top);
 }

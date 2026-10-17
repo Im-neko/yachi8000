@@ -251,7 +251,7 @@ async function findDominant(
     lines.map((l) => l.line),
     1,
   )[0];
-  const token = top ? distinctiveToken(top.pattern) : undefined;
+  const token = top ? distinctiveToken(top.pattern, top.sample) : undefined;
   if (!top || !token) return undefined;
 
   const offsetHours = Math.round(
@@ -263,8 +263,12 @@ async function findDominant(
       at: now,
     }),
   );
-  const share = shareOf(matching, peak.count);
-  return share === undefined ? undefined : { pattern: top.pattern, share };
+  // 識別語は元の行にあった語なので 0 件にはならないはず。0 件なら数え損ねなので、
+  // 「0%」と言い切らず、取れなかったこととして扱う。
+  const share = matching > 0 ? shareOf(matching, peak.count) : undefined;
+  return share === undefined
+    ? undefined
+    : { pattern: top.pattern, token, share };
 }
 
 /**
@@ -279,24 +283,34 @@ async function findPrecursors(
   now: Date,
 ): Promise<string[]> {
   const surrounding = surroundingQueryOf(source);
-  const floodToken = dominant ? distinctiveToken(dominant.pattern) : undefined;
-  const exclude = floodToken ? ` != \`${floodToken}\`` : '';
-  const lines = await deps.logs.lines({
-    logql: `${surrounding}${exclude} ${NOT_CONTINUATION}`,
-    start: new Date(onset.getTime() - PRECURSOR_BEFORE_MINUTES * MINUTE_MS),
-    end: new Date(onset.getTime() + PRECURSOR_AFTER_MINUTES * MINUTE_MS),
-    limit: PRECURSOR_LINES,
-  });
+  const exclude = dominant ? ` != \`${dominant.token}\`` : '';
+  const logql = `${surrounding}${exclude} ${NOT_CONTINUATION}`;
+  // 引き金は始まりの前にあるので、前と後を別に引く（新しい順に上限まで取るため、
+  // 始まりの後の騒がしい行が、前の行を押し出さないようにする）。
+  const lines = [
+    ...(await deps.logs.lines({
+      logql,
+      start: new Date(onset.getTime() - PRECURSOR_BEFORE_MINUTES * MINUTE_MS),
+      end: onset,
+      limit: PRECURSOR_LINES,
+    })),
+    ...(await deps.logs.lines({
+      logql,
+      start: onset,
+      end: new Date(onset.getTime() + PRECURSOR_AFTER_MINUTES * MINUTE_MS),
+      limit: PRECURSOR_LINES / 3,
+    })),
+  ];
 
   // 「その前の 24 時間」は、拾った範囲の始まりまで。
   const priorEnd = onset.getTime() - PRECURSOR_BEFORE_MINUTES * MINUTE_MS;
   const offset = Math.ceil((now.getTime() - priorEnd) / MINUTE_MS);
   const precursors: string[] = [];
-  for (const { pattern } of groupLogPatterns(
+  for (const { pattern, sample } of groupLogPatterns(
     lines.map((l) => l.line),
     PRECURSOR_CANDIDATES,
   )) {
-    const token = distinctiveToken(pattern);
+    const token = distinctiveToken(pattern, sample);
     if (!token) continue;
     const before = sumOf(
       await deps.logs.metric({
@@ -319,8 +333,17 @@ async function findConcurrent(
   now: Date,
 ): Promise<string[]> {
   const found = new Set<string>();
-  const from = new Date(dossier.onset ?? onsetSlice.start).getTime() - HOUR_MS;
-  const to = (dossier.end ? new Date(dossier.end) : now).getTime() + HOUR_MS;
+  // 調べた範囲より前から続いているなら、始まりの時刻は分からない。範囲全体で見ると
+  // 発火中のアラートがぜんぶ当たるので、ピークの区間の前後に絞る。
+  const span =
+    dossier.startedBeforeTimeline && dossier.peak
+      ? { from: dossier.peak.start, to: dossier.peak.end }
+      : {
+          from: dossier.onset ?? onsetSlice.start,
+          to: dossier.end ?? now.toISOString(),
+        };
+  const from = new Date(span.from).getTime() - HOUR_MS;
+  const to = new Date(span.to).getTime() + HOUR_MS;
 
   const alerts = await deps.metrics.instant({
     promql: 'ALERTS_FOR_STATE{alertname!~"Watchdog|InfoInhibitor"}',

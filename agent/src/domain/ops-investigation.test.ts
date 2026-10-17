@@ -45,16 +45,31 @@ describe('shareOf', () => {
 describe('distinctiveToken', () => {
   it('英字と _ だけの一番長い語を使う。数字は正規化で潰れているので含めない', () => {
     expect(
-      distinctiveToken('<time> kernel: WARNING: CPU: N at smsdvb_do_tune'),
+      distinctiveToken(
+        '<time> kernel: WARNING: CPU: N at smsdvb_do_tune',
+        '2026-10-16T03:10:00Z kernel: WARNING: CPU: 1 at smsdvb_do_tune',
+      ),
     ).toBe('smsdvb_do_tune');
   });
 
   it('時刻などの置き換え語は選ばない', () => {
-    expect(distinctiveToken('<time> <uuid> <ip> ab cd')).toBeUndefined();
+    expect(
+      distinctiveToken('<time> <uuid> <ip> ab cd', '<time> <uuid> <ip> ab cd'),
+    ).toBeUndefined();
   });
 
   it('短い語しか無ければ選ばない（他の行にも出るので数えられない）', () => {
-    expect(distinctiveToken('err N ok')).toBeUndefined();
+    expect(distinctiveToken('err N ok', 'err 1 ok')).toBeUndefined();
+  });
+
+  it('数字が隣り合う語は、正規化で化けて元の行に無いので選ばない', () => {
+    // `v1beta1` は正規化すると `vNbetaN`。これで数えると、どの行にも当たらず 0 件になる。
+    expect(
+      distinctiveToken(
+        'GET /apis/custom.metrics.k8s.io/vNbetaN userAgent',
+        'GET /apis/custom.metrics.k8s.io/v1beta1 userAgent',
+      ),
+    ).toBe('userAgent');
   });
 });
 
@@ -82,7 +97,11 @@ const flood: OpsDossier = {
     end: '2026-10-15T20:00:00.000Z',
     count: 3_100_000,
   },
-  dominant: { pattern: 'kernel: WARNING: smsdvb_do_tune', share: 0.94 },
+  dominant: {
+    pattern: 'kernel: WARNING: smsdvb_do_tune',
+    token: 'smsdvb_do_tune',
+    share: 0.94,
+  },
   precursors: ['sudo: modprobe -r smsdvb'],
   concurrent: ['アラート NodeNoisy が発火（warning）'],
   gaps: [],
