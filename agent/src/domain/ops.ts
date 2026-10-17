@@ -5,6 +5,10 @@
  * 言葉にするだけで、重大度も項目の有無も決めない（INV-3）。
  */
 
+import { JST_OFFSET_MS } from './jst.ts';
+import type { OpsDossier, OpsHypothesis } from './ops-investigation.ts';
+import { renderDossierFacts, renderHypothesis } from './ops-investigation.ts';
+
 export type OpsSeverity = 'notice' | 'warning' | 'critical';
 export type OpsOverall = OpsSeverity | 'ok';
 
@@ -28,6 +32,10 @@ export interface OpsFinding {
   detail: string;
   /** ログから拾った代表的な行（正規化・マスク済み）。無いこともある。 */
   evidence?: string[];
+  /** 急増の原因調査（F-54）で数えた事実。急増の上位だけに付く。 */
+  dossier?: OpsDossier;
+  /** 調書を読んだ LLM の見立て。**推測**であり、事実とは分けて出す。 */
+  hypothesis?: OpsHypothesis;
 }
 
 /**
@@ -95,6 +103,14 @@ function median(values: readonly number[]): number {
   const upper = sorted[middle] ?? 0;
   if (sorted.length % 2 === 1) return upper;
   return ((sorted[middle - 1] ?? 0) + upper) / 2;
+}
+
+/** 送信元の 24 時間のエラー行数の平常（過去の日ごとの中央値）。 */
+export function errorBaseline(
+  source: string,
+  history: readonly OpsSnapshot[],
+): number {
+  return median(history.map((h) => h.errorCounts[source] ?? 0));
 }
 
 function percent(share: number): string {
@@ -270,31 +286,12 @@ export function compareStatusMix(
   return findings;
 }
 
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
 function jstParts(date: Date): { day: string; hour: number } {
   const shifted = new Date(date.getTime() + JST_OFFSET_MS);
   return {
     day: shifted.toISOString().slice(0, 10),
     hour: shifted.getUTCHours(),
   };
-}
-
-/** `10-16 03:00〜05:00（JST）` の形。日をまたぐなら両端に日付を付ける。 */
-export function formatJstWindow(start: Date, end: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const label = (date: Date) => {
-    const shifted = new Date(date.getTime() + JST_OFFSET_MS);
-    return {
-      day: `${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`,
-      time: `${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`,
-    };
-  };
-  const from = label(start);
-  const to = label(end);
-  return from.day === to.day
-    ? `${from.day} ${from.time}〜${to.time}（JST）`
-    : `${from.day} ${from.time}〜${to.day} ${to.time}（JST）`;
 }
 
 export function jstDay(date: Date): string {
@@ -371,6 +368,8 @@ export function normalizeLogLine(line: string): string {
 export interface LogPattern {
   pattern: string;
   count: number;
+  /** この型で最初に見た元の行（正規化していない）。 */
+  sample: string;
 }
 
 /** 行を正規化して数え、多い順に `top` 種類だけ返す。 */
@@ -378,14 +377,16 @@ export function groupLogPatterns(
   lines: readonly string[],
   top: number,
 ): LogPattern[] {
-  const counts = new Map<string, number>();
+  const groups = new Map<string, { count: number; sample: string }>();
   for (const line of lines) {
     const key = normalizeLogLine(line);
     if (key === '') continue;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const group = groups.get(key);
+    if (group) group.count++;
+    else groups.set(key, { count: 1, sample: line });
   }
-  return [...counts.entries()]
-    .map(([pattern, count]) => ({ pattern, count }))
+  return [...groups.entries()]
+    .map(([pattern, { count, sample }]) => ({ pattern, count, sample }))
     .sort((a, b) => b.count - a.count)
     .slice(0, top);
 }
@@ -406,6 +407,15 @@ export function overallLabel(overall: OpsOverall): string {
 export function renderFindingsText(findings: readonly OpsFinding[]): string {
   if (findings.length === 0) return '気になる点は見つかりませんでした。';
   return sortBySeverity(findings)
-    .map((f) => `- ${f.title}\n  ${f.detail}`)
+    .map((f) =>
+      [
+        `- ${f.title}`,
+        `  ${f.detail}`,
+        ...(f.dossier ? renderDossierFacts(f.dossier) : []).map(
+          (x) => `  ${x}`,
+        ),
+        ...(f.hypothesis ? [`  ${renderHypothesis(f.hypothesis)}`] : []),
+      ].join('\n'),
+    )
     .join('\n');
 }

@@ -3,7 +3,6 @@ import {
   compareClientIps,
   compareErrorCounts,
   compareStatusMix,
-  formatJstWindow,
   groupLogPatterns,
   isReviewDue,
   jstDay,
@@ -268,26 +267,6 @@ describe('groupLogPatterns', () => {
 
   it('正規化の過程で秘密も伏せる', () => {
     expect(normalizeLogLine('login token=abcd1234efgh')).toContain('token=***');
-  });
-});
-
-describe('formatJstWindow', () => {
-  it('同じ日なら日付は 1 回', () => {
-    expect(
-      formatJstWindow(
-        new Date('2026-10-15T18:00:00Z'),
-        new Date('2026-10-15T20:00:00Z'),
-      ),
-    ).toBe('10-16 03:00〜05:00（JST）');
-  });
-
-  it('日をまたぐなら両端に日付を付ける', () => {
-    expect(
-      formatJstWindow(
-        new Date('2026-10-15T14:00:00Z'),
-        new Date('2026-10-15T16:00:00Z'),
-      ),
-    ).toBe('10-15 23:00〜10-16 01:00（JST）');
   });
 });
 

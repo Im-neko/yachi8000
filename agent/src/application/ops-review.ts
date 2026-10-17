@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { formatJstWindow } from '../domain/jst.ts';
 import {
   BASELINE_DAYS,
   compareClientIps,
   compareErrorCounts,
   compareStatusMix,
-  formatJstWindow,
   groupLogPatterns,
   hasEnoughHistory,
   isReviewDue,
@@ -23,8 +23,10 @@ import {
   sortBySeverity,
   statusClassCounts,
 } from '../domain/ops.ts';
+import { renderDossierFacts } from '../domain/ops-investigation.ts';
 import type { LogSource } from '../domain/ports/log-source.ts';
 import type { MetricSource } from '../domain/ports/metric-source.ts';
+import type { OpsHypothesizer } from '../domain/ports/ops-hypothesizer.ts';
 import type { OpsNarrator } from '../domain/ports/ops-narrator.ts';
 import type {
   OpsReviewRecord,
@@ -32,6 +34,25 @@ import type {
 } from '../domain/ports/ops-review-store.ts';
 import type { SettingsProvider } from '../domain/ports/settings-provider.ts';
 import type { TextNotifier } from '../domain/ports/text-notifier.ts';
+import { investigateSurges } from './ops-investigation.ts';
+
+import {
+  ACCESS_LINE,
+  ERROR_WORDS,
+  evidenceQueryOf,
+  HOME_NO_UNIT,
+  HOME_PREFIX,
+  HOUR_MS,
+  INGRESS_SELECTOR,
+  JOURNAL_SELECTOR,
+  NOT_CONTINUATION,
+  RECENT_SLICES,
+  SAFE_SOURCE_NAME,
+  SLICE_COUNT,
+  SLICE_HOURS,
+  sliceRange,
+  WINDOW_MS,
+} from './ops-log-queries.ts';
 
 /** 日次の見回りの既定。設定ファイルの `opsReview` で上書きできる。 */
 const DEFAULT_HOUR_JST = 8;
@@ -49,39 +70,6 @@ const MAX_FINDINGS_PER_KIND = 8;
 export const MAX_QUERY_MINUTES = 24 * 60;
 export const MAX_QUERY_LINES = 100;
 
-const HOUR_MS = 60 * 60 * 1000;
-const WINDOW_MS = 24 * HOUR_MS;
-
-/**
- * ここにあるクエリは**この基盤のログの形を知っている**。ingress の
- * アクセスログは `<ip> - - [<time>] "<method> <path> <proto>" <status> ...`、
- * 同じ namespace のエラーログは別の形（`[error] ...`）で出る。
- */
-const ERROR_WORDS = '(?i)(\\b(error|err|fatal|panic)\\b|oomkill)';
-/** アクセスログ行（URL に "error" と書いてあるだけで数えない）。 */
-const ACCESS_LINE = '^[0-9a-fA-F:.]+ - \\S+ \\[';
-const INGRESS_SELECTOR = '{namespace="ingress-nginx"}';
-
-/**
- * スタックトレース・レジスタダンプ・カーネルの警告の本体など、**1 件の出来事の
- * 2 行目以降**。1 行ずつ数えると、例外 1 件が 30 行に、カーネルの警告 1 件が 64 行に
- * 化けて、倍率が桁違いに跳ねる。先頭の行（見出し・例外の本題）だけを数える。
- * CRI の前置き（`<時刻> stderr F `）が付いた形も同じに扱う。
- */
-export const CONTINUATION_LINE = String.raw`^(\S+ std(?:out|err) [FP] )?(\s|(?:RIP|RSP|RAX|RBX|RCX|RDX|RSI|RDI|RBP|R[0-9]+|FS|GS|CS|CR[0-9]|DR[0-9]|Code|CPU|Hardware name|Modules linked in|Tainted|Call Trace|PKRU)[: ]|-+\[ (?:cut here|end trace)|</?(?:TASK|IRQ)>|(?:\[[^\]]*\]\s+)?(?:--- End of inner|--->|#{5,})|\[[^\]]*\]\s+at )`;
-const NOT_CONTINUATION = `!~ \`${CONTINUATION_LINE}\``;
-
-/**
- * 24 時間を `SLICE_HOURS` ごとに分けて問い合わせる（`offset` が区間の位置）。
- * Loki は 30 秒ほどで応答を切るので、一括で投げると、中身が合っていても受け取れない。
- */
-const SLICE_HOURS = 2;
-const SLICE_COUNT = 24 / SLICE_HOURS;
-/** 「いま収まっているか」を見る直近の区間数（6 時間）。 */
-const RECENT_SLICES = 3;
-const sliceRange = (offsetHours: number) =>
-  `[${SLICE_HOURS}h] offset ${offsetHours}h`;
-
 function errorCountQuery(offsetHours: number): string {
   return `sum by (namespace) (count_over_time({namespace=~".+"} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` ${NOT_CONTINUATION} ${sliceRange(offsetHours)}))`;
 }
@@ -93,21 +81,9 @@ function errorCountQuery(offsetHours: number): string {
 function homeContainerErrorQuery(offsetHours: number): string {
   return `sum by (container_name) (count_over_time({site="home", job="docker"} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` ${NOT_CONTINUATION} ${sliceRange(offsetHours)}))`;
 }
-/**
- * journal は優先度のラベルで絞る。本文の正規表現だけで 24 時間ぶんを読むと、
- * ログが洪水になった翌日（7,000 万行）に問い合わせが遅すぎて落ちる。
- */
-const JOURNAL_PRIORITY = 'priority=~"warning|error|crit.*|alert|emerg.*"';
-const JOURNAL_SELECTOR = `{site="home", job="journal", ${JOURNAL_PRIORITY}}`;
-
 function journalErrorQuery(offsetHours: number): string {
   return `sum by (unit) (count_over_time(${JOURNAL_SELECTOR} ${NOT_CONTINUATION} ${sliceRange(offsetHours)}))`;
 }
-const HOME_PREFIX = 'home/';
-/** `unit` ラベルの無い journal の行（カーネル・監査）の送信元名。 */
-const HOME_NO_UNIT = 'kernel';
-const SYSTEMD_UNIT = /\.(service|scope|socket|timer|mount)$/;
-
 const CLIENT_IP_QUERY = `topk(50, sum by (ip) (count_over_time(${INGRESS_SELECTOR} | regexp \`^(?P<ip>[0-9a-fA-F:.]+) - \` | ip != "" [24h])))`;
 const STATUS_QUERY = `sum by (status) (count_over_time(${INGRESS_SELECTOR} | regexp \`"[A-Z]+ [^"]*" (?P<status>[0-9]{3}) \` | status != "" [24h]))`;
 
@@ -132,6 +108,7 @@ export interface OpsQueryDependencies {
 export interface OpsReviewDependencies extends OpsQueryDependencies {
   store: OpsReviewStore;
   narrator: OpsNarrator;
+  hypothesizer: OpsHypothesizer;
   text: TextNotifier;
   settings: SettingsProvider;
   log: OpsLogger;
@@ -364,6 +341,8 @@ async function collectSnapshot(
   snapshot?: OpsSnapshot;
   /** 直近 `RECENT_SLICES` 区間の件数を 24 時間ぶんに引き伸ばしたもの。 */
   recentErrorCounts?: Record<string, number>;
+  /** 送信元ごとの、2 時間ごとのエラー行数（先頭が最新）。原因調査が使い回す。 */
+  sliceCounts?: Record<string, number[]>;
   failures: OpsFinding[];
 }> {
   // Loki は小さい構成なので、問い合わせは直列に投げる（並列にすると
@@ -423,6 +402,13 @@ async function collectSnapshot(
     }
     return counts;
   };
+  const perSlice = Array.from({ length: SLICE_COUNT }, (_, index) =>
+    assemble((slices) => slices[index] ?? []),
+  );
+  const sliceCounts: Record<string, number[]> = {};
+  for (const source of new Set(perSlice.flatMap((c) => Object.keys(c)))) {
+    sliceCounts[source] = perSlice.map((counts) => counts[source] ?? 0);
+  }
   const scale = SLICE_COUNT / RECENT_SLICES;
   const recentErrorCounts = Object.fromEntries(
     Object.entries(
@@ -433,28 +419,13 @@ async function collectSnapshot(
   return {
     failures,
     recentErrorCounts,
+    sliceCounts,
     snapshot: {
       errorCounts: assemble((slices) => slices.flat()),
       clientIps: toCounts(ips.value, 'ip'),
       statusCounts: statusClassCounts(toCounts(statuses.value, 'status')),
     },
   };
-}
-
-const SAFE_SOURCE_NAME = /^(home\/)?[\w.@:-]+$/;
-
-/** 送信元の名前から、その代表的なエラー行を引くログクエリを作る。 */
-function evidenceQueryOf(source: string): string {
-  const words = `|~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` ${NOT_CONTINUATION}`;
-  if (!source.startsWith(HOME_PREFIX))
-    return `{namespace="${source}"} ${words}`;
-  const name = source.slice(HOME_PREFIX.length);
-  if (name === HOME_NO_UNIT) {
-    return `{site="home", job="journal", unit="", ${JOURNAL_PRIORITY}} ${NOT_CONTINUATION}`;
-  }
-  return SYSTEMD_UNIT.test(name)
-    ? `{site="home", job="journal", unit="${name}", ${JOURNAL_PRIORITY}} ${NOT_CONTINUATION}`
-    : `{site="home", job="docker", container_name="${name}"} ${words}`;
 }
 
 /**
@@ -508,7 +479,13 @@ async function attachEvidence(
     if (!SAFE_SOURCE_NAME.test(source)) continue;
     try {
       const logql = evidenceQueryOf(source);
-      const window = await findPeakWindow(deps, logql, now);
+      const window = finding.dossier?.peak
+        ? {
+            start: new Date(finding.dossier.peak.start),
+            end: new Date(finding.dossier.peak.end),
+            narrowed: true,
+          }
+        : await findPeakWindow(deps, logql, now);
       const lines = await deps.logs.lines({
         logql,
         start: window.start,
@@ -529,6 +506,46 @@ async function attachEvidence(
         `${source} の代表的なエラー行を取れなかった（${(error as Error).message}）`,
       );
     }
+  }
+}
+
+/**
+ * 調書のある項目に、原因の見立て（推測）を添える。**1 回の呼び出しで、ループは持たない。**
+ * 付けられなくても項目は残す —— 事実の側（調書）は欠けない。
+ */
+async function attachHypotheses(
+  deps: Pick<OpsReviewDependencies, 'hypothesizer' | 'log'>,
+  findings: OpsFinding[],
+  now: Date,
+  notes: string[],
+): Promise<void> {
+  const investigated = findings.filter(
+    (f): f is OpsFinding & { dossier: NonNullable<OpsFinding['dossier']> } =>
+      f.dossier !== undefined,
+  );
+  if (investigated.length === 0) return;
+
+  try {
+    const results = await deps.hypothesizer.hypothesize({
+      day: jstDay(now),
+      items: investigated.map((f) => ({
+        findingId: f.id,
+        title: f.title,
+        detail: f.detail,
+        facts: renderDossierFacts(f.dossier),
+        evidence: f.evidence ?? [],
+      })),
+    });
+    for (const { findingId, ...hypothesis } of results) {
+      const finding = investigated.find((f) => f.id === findingId);
+      if (finding) finding.hypothesis = hypothesis;
+    }
+  } catch (error) {
+    deps.log.warn(
+      { err: error },
+      'Failed to hypothesize the cause of the error surges — reporting the facts only',
+    );
+    notes.push('原因の見立ては付けられなかった（数えた事実だけ載せた）');
   }
 }
 
@@ -670,8 +687,21 @@ export async function runOpsReview(
       MAX_FINDINGS_PER_KIND,
       notes,
     );
+    await investigateSurges(
+      deps,
+      {
+        surges: sortBySeverity(
+          findings.filter((f) => f.id.startsWith('error-surge:')),
+        ),
+        sliceCounts: collected.sliceCounts ?? {},
+        history,
+        now,
+      },
+      notes,
+    );
     await attachEvidence(deps, findings, now, notes);
     await attachServerErrorSources(deps, findings, now, notes);
+    await attachHypotheses(deps, findings, now, notes);
   } else {
     notes.push('ログの集計が揃わなかったため、今日の分は平常の基準に残さない');
   }
@@ -725,6 +755,8 @@ function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
 
+const DISCORD_MESSAGE_LIMIT = 2_000;
+
 /** Discord へ出す本文。**マスクは出口で必ず通す。** */
 export function composeReviewMessage(record: OpsReviewRecord): string {
   const day = jstDay(new Date(record.reviewedAt));
@@ -741,12 +773,17 @@ export function composeReviewMessage(record: OpsReviewRecord): string {
     ].join('\n');
   const notes =
     record.notes.length > 0 ? `\n（${record.notes.join(' / ')}）` : '';
-  return truncate(
-    maskSecrets(
-      `${overallLabel(record.severity)} 日次レビュー ${day}\n${body}${notes}`,
-    ),
-    2_000,
+  // 長さの上限で削るのは本文だけ。注記には「他に N 件ある」「見立てを付けられなかった」
+  // など、報告が欠けたことを伝えるものが入る。本文と一緒に切り捨てない（INV-7）。
+  const header = maskSecrets(
+    `${overallLabel(record.severity)} 日次レビュー ${day}\n`,
   );
+  const footer = maskSecrets(notes);
+  const room = Math.max(
+    0,
+    DISCORD_MESSAGE_LIMIT - header.length - footer.length,
+  );
+  return `${header}${truncate(maskSecrets(body), room)}${footer}`;
 }
 
 /** 見回りの結果をチャンネルへ出す。出せなくても記録は残る。 */
