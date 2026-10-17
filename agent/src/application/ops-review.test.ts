@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MetricSample, OpsSnapshot } from '../domain/ops.ts';
 import type { LogSource } from '../domain/ports/log-source.ts';
 import type { MetricSource } from '../domain/ports/metric-source.ts';
+import type { OpsNarrationMaterial } from '../domain/ports/ops-narrator.ts';
 import type {
   OpsReviewRecord,
   OpsReviewStore,
 } from '../domain/ports/ops-review-store.ts';
 import type { Settings } from '../domain/settings.ts';
+import { CONTINUATION_LINE } from './ops-log-queries.ts';
 import {
-  CONTINUATION_LINE,
   checkClusterHealth,
   composeReviewMessage,
   MAX_QUERY_LINES,
@@ -127,6 +128,7 @@ function createDeps(
     metrics: createMetrics(),
     store: createFakeStore(),
     narrator: { narrate: async () => '本文です' },
+    hypothesizer: { hypothesize: async () => [] },
     text: {
       send: async (channelId, text) => {
         sent.push({ channelId, text });
@@ -411,7 +413,6 @@ describe('runOpsReview', () => {
   it('代表行は、エラーがいちばん多かった区間から取る', async () => {
     const lineRanges: Array<{ start: Date; end: Date }> = [];
     const logs = createLogs({
-      'sum by (namespace)': [sample({ namespace: 'app' }, 1500)],
       'sum by (ip)': [sample({ ip: '192.0.2.1' }, 300)],
       'sum by (status)': [sample({ status: '200' }, 1000)],
     });
@@ -420,8 +421,12 @@ describe('runOpsReview', () => {
       logs: {
         metric: async (query) => {
           // 4 区間前（8〜6 時間前）だけが多かった。
+          const peak = query.logql.includes('offset 6h');
+          if (query.logql.startsWith('sum by (namespace)')) {
+            return [sample({ namespace: 'app' }, peak ? 1500 : 5)];
+          }
           if (query.logql.startsWith('sum(count_over_time(')) {
-            return [sample({}, query.logql.includes('offset 6h') ? 900 : 5)];
+            return [sample({}, peak ? 900 : 5)];
           }
           return logs.metric(query);
         },
@@ -844,5 +849,128 @@ describe('checkClusterHealth', () => {
       'metric:node-disk',
       'metric:alerts',
     ]);
+  });
+});
+
+describe('急増の原因調査（F-54）', () => {
+  function surgingLogs() {
+    return createLogs(
+      {
+        'sum by (namespace)': [sample({ namespace: 'app' }, 1500)],
+        'sum by (ip)': [sample({ ip: '192.0.2.1' }, 300)],
+        'sum by (status)': [sample({ status: '200' }, 1000)],
+      },
+      [{ labels: { pod: 'p1' }, line: 'connect() failed to 10.0.0.1:80' }],
+    );
+  }
+
+  it('急増に調書を付け、調書の事実と代表行を渡して見立てを添える。言葉にする側にも渡る', async () => {
+    const hypothesize = vi.fn(async () => [
+      {
+        findingId: 'error-surge:app',
+        text: '上流の接続先が落ちているようです。',
+        confidence: 'low' as const,
+        unverified: '上流の状態',
+      },
+    ]);
+    const narrate = vi.fn(
+      async (_material: OpsNarrationMaterial) => '本文です',
+    );
+    const { deps } = createDeps({
+      store: createFakeStore(fiveQuietDays()),
+      logs: surgingLogs(),
+      hypothesizer: { hypothesize },
+      narrator: { narrate },
+    });
+
+    const record = await runOpsReview(deps, NOW);
+
+    const surge = record.findings.find((f) => f.id === 'error-surge:app');
+    expect(surge?.dossier?.source).toBe('app');
+    expect(surge?.dossier?.ongoing).toBe(true);
+    expect(surge?.hypothesis).toEqual({
+      text: '上流の接続先が落ちているようです。',
+      confidence: 'low',
+      unverified: '上流の状態',
+    });
+    expect(hypothesize).toHaveBeenCalledTimes(1);
+    const [material] = hypothesize.mock.calls[0] as unknown as [
+      {
+        items: Array<{
+          findingId: string;
+          facts: string[];
+          evidence: string[];
+        }>;
+      },
+    ];
+    expect(material.items[0]?.findingId).toBe('error-surge:app');
+    expect(material.items[0]?.facts.length).toBeGreaterThan(0);
+    expect(material.items[0]?.evidence[0]).toBe('1× connect() failed to <ip>');
+    expect(narrate.mock.calls[0]?.[0].findings[0]?.hypothesis).toBeDefined();
+  });
+
+  it('見立てを付けられなくても、調書（事実）と項目は残し、WARN と注記を出す', async () => {
+    const { deps, log } = createDeps({
+      store: createFakeStore(fiveQuietDays()),
+      logs: surgingLogs(),
+      hypothesizer: {
+        hypothesize: async () => {
+          throw new Error('応答が JSON ではありませんでした');
+        },
+      },
+    });
+
+    const record = await runOpsReview(deps, NOW);
+
+    const surge = record.findings.find((f) => f.id === 'error-surge:app');
+    expect(surge?.dossier).toBeDefined();
+    expect(surge?.hypothesis).toBeUndefined();
+    expect(record.notes).toContain(
+      '原因の見立ては付けられなかった（数えた事実だけ載せた）',
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      expect.stringContaining('hypothesize'),
+    );
+  });
+
+  it('急増が無い日は、見立てを呼ばない', async () => {
+    const hypothesize = vi.fn(async () => []);
+    const { deps } = createDeps({
+      store: createFakeStore(fiveQuietDays()),
+      hypothesizer: { hypothesize },
+    });
+
+    await runOpsReview(deps, NOW);
+
+    expect(hypothesize).not.toHaveBeenCalled();
+  });
+
+  it('言葉にできず事実の一覧へ縮退しても、見立ては「推測」と分かる形で、事実とは別の行に出る', async () => {
+    const { deps } = createDeps({
+      store: createFakeStore(fiveQuietDays()),
+      logs: surgingLogs(),
+      narrator: {
+        narrate: async () => {
+          throw new Error('too long');
+        },
+      },
+      hypothesizer: {
+        hypothesize: async () => [
+          {
+            findingId: 'error-surge:app',
+            text: '上流が落ちているようです。',
+            confidence: 'low' as const,
+            unverified: '',
+          },
+        ],
+      },
+    });
+
+    const record = await runOpsReview(deps, NOW);
+    const text = composeReviewMessage(record);
+
+    expect(text).toContain('いまも続いている');
+    expect(text).toContain('（推測・確度は低い）上流が落ちているようです。');
   });
 });

@@ -48,6 +48,7 @@ import { createDiscordVoiceOutput } from './infrastructure/discord/voice-output.
 import { createGithubIssueTracker } from './infrastructure/github/github-issue-tracker.ts';
 import { createProxyEmbedder } from './infrastructure/llm/embedder.ts';
 import { createNotificationRewriter } from './infrastructure/llm/notification-rewriter.ts';
+import { createOpsHypothesizer } from './infrastructure/llm/ops-hypothesizer.ts';
 import { createOpsNarrator } from './infrastructure/llm/ops-narrator.ts';
 import { createReminderPhraser } from './infrastructure/llm/reminder-phraser.ts';
 import { createPgvectorMemoryStore } from './infrastructure/memory/pgvector-memory-store.ts';
@@ -379,6 +380,11 @@ export function createVoiceRuntime(client: Client): VoiceRuntime {
             apiKey: env.LLM_PROXY_API_KEY,
             model: env.LLM_MODEL,
             settings,
+          }),
+          hypothesizer: createOpsHypothesizer({
+            baseUrl: env.LLM_PROXY_BASE_URL,
+            apiKey: env.LLM_PROXY_API_KEY,
+            model: env.LLM_MODEL,
           }),
           text,
           settings,
