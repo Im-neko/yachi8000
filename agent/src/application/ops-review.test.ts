@@ -481,6 +481,100 @@ describe('runOpsReview', () => {
     }
   });
 
+  describe('前回報告した急増の続きの扱い', () => {
+    const reportedSurge = {
+      id: 'error-surge:app',
+      severity: 'warning' as const,
+      title: 'app のエラー行が平常の 15.0 倍',
+      detail: '24 時間のエラー行 1500 件',
+    };
+    const historyWithReport = () => [
+      { ...priorReview(1, QUIET), findings: [reportedSurge] },
+      ...[2, 3, 4, 5].map((day) => priorReview(day, QUIET)),
+    ];
+
+    /** 区間（offset）ごとに namespace のエラー件数を答える代役。 */
+    function logsBySlice(countAt: (offsetHours: number) => number): LogSource {
+      const base = createLogs({
+        'sum by (ip)': [sample({ ip: '192.0.2.1' }, 300)],
+        'sum by (status)': [sample({ status: '200' }, 1000)],
+      });
+      return {
+        ...base,
+        metric: async (query) => {
+          if (query.logql.includes('sum by (namespace)')) {
+            const offset = Number(/offset (\d+)h/.exec(query.logql)?.[1]);
+            const count = countAt(offset);
+            return count > 0 ? [sample({ namespace: 'app' }, count)] : [];
+          }
+          return base.metric(query);
+        },
+      };
+    }
+
+    it('報告済みで、いまは収まっていれば外す（24 時間の窓に尻尾が残っていても）', async () => {
+      const { deps, log } = createDeps({
+        store: createFakeStore(historyWithReport()),
+        logs: logsBySlice((offset) => (offset >= 12 ? 300 : 0)),
+      });
+
+      const record = await runOpsReview(deps, NOW);
+
+      expect(record.snapshot?.errorCounts.app).toBe(1800);
+      expect(record.findings.map((f) => f.id)).not.toContain('error-surge:app');
+      expect(log.info).toHaveBeenCalledWith(
+        { sources: ['error-surge:app'] },
+        expect.stringContaining('calmed down'),
+      );
+    });
+
+    it('報告済みで、いまも続いていれば、続いていると添えて出す', async () => {
+      const { deps } = createDeps({
+        store: createFakeStore(historyWithReport()),
+        logs: logsBySlice((offset) => (offset <= 4 ? 200 : 0)),
+      });
+
+      const record = await runOpsReview(deps, NOW);
+
+      const surge = record.findings.find((f) => f.id === 'error-surge:app');
+      expect(surge?.detail).toContain('いまも続いている');
+    });
+
+    it('前回報告していなければ、収まっていても出す（まだ知らせていない）', async () => {
+      const { deps } = createDeps({
+        store: createFakeStore(fiveQuietDays()),
+        logs: logsBySlice((offset) => (offset >= 12 ? 300 : 0)),
+      });
+
+      const record = await runOpsReview(deps, NOW);
+
+      expect(record.findings.map((f) => f.id)).toContain('error-surge:app');
+    });
+
+    it('前回の見回りが失敗していたなら報告済みとは数えない', async () => {
+      const failed: OpsReviewRecord = {
+        id: 'f',
+        reviewedAt: new Date(NOW.getTime() - 86_400_000).toISOString(),
+        status: 'failed',
+        severity: 'critical',
+        findings: [reportedSurge],
+        error: 'x',
+        notes: [],
+      };
+      const { deps } = createDeps({
+        store: createFakeStore([
+          failed,
+          ...[2, 3, 4, 5].map((day) => priorReview(day, QUIET)),
+        ]),
+        logs: logsBySlice((offset) => (offset >= 12 ? 300 : 0)),
+      });
+
+      const record = await runOpsReview(deps, NOW);
+
+      expect(record.findings.map((f) => f.id)).toContain('error-surge:app');
+    });
+  });
+
   it('初めて見るアクセス元を挙げる', async () => {
     const { deps } = createDeps({
       store: createFakeStore(fiveQuietDays()),

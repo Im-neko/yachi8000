@@ -140,6 +140,32 @@ export function compareErrorCounts(
   return findings;
 }
 
+/**
+ * 前回の見回りで報告済みの急増を、いま収まっているかで振り分ける。
+ * 収まっていれば外し（`calmed` に鍵を返す）、続いていれば続いていると添える。
+ */
+export function settleReportedSurges(
+  surges: readonly OpsFinding[],
+  reported: ReadonlySet<string>,
+  stillSurging: ReadonlySet<string>,
+): { kept: OpsFinding[]; calmed: string[] } {
+  const kept: OpsFinding[] = [];
+  const calmed: string[] = [];
+  for (const surge of surges) {
+    if (!reported.has(surge.id)) {
+      kept.push(surge);
+    } else if (stillSurging.has(surge.id)) {
+      kept.push({
+        ...surge,
+        detail: `${surge.detail}。前回の見回りでも報告済みで、いまも続いている`,
+      });
+    } else {
+      calmed.push(surge.id);
+    }
+  }
+  return { kept, calmed };
+}
+
 /** アクセス元の傾向の変化を挙げる。 */
 export function compareClientIps(
   today: Readonly<Record<string, number>>,

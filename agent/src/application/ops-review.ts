@@ -19,6 +19,7 @@ import {
   overallLabel,
   overallSeverity,
   renderFindingsText,
+  settleReportedSurges,
   sortBySeverity,
   statusClassCounts,
 } from '../domain/ops.ts';
@@ -76,6 +77,8 @@ const NOT_CONTINUATION = `!~ \`${CONTINUATION_LINE}\``;
  */
 const SLICE_HOURS = 2;
 const SLICE_COUNT = 24 / SLICE_HOURS;
+/** 「いま収まっているか」を見る直近の区間数（6 時間）。 */
+const RECENT_SLICES = 3;
 const sliceRange = (offsetHours: number) =>
   `[${SLICE_HOURS}h] offset ${offsetHours}h`;
 
@@ -326,7 +329,7 @@ function toJournalCounts(
 }
 
 /**
- * 24 時間を `SLICE_HOURS` ごとに分けて直列に問い合わせ、サンプルを寄せ集める。
+ * 24 時間を `SLICE_HOURS` ごとに分けて直列に問い合わせる（新しい区間が先頭）。
  * どれか 1 本でも取れなかったら投げる（欠けた区間を「0 件」にしない）。
  * `build` には、その区間の `offset`（時間）を渡す。
  */
@@ -334,14 +337,14 @@ async function collectSliced(
   deps: OpsQueryDependencies,
   now: Date,
   build: (offsetHours: number) => string,
-): Promise<MetricSample[]> {
-  const samples: MetricSample[] = [];
+): Promise<MetricSample[][]> {
+  const slices: MetricSample[][] = [];
   for (let i = 0; i < SLICE_COUNT; i++) {
-    samples.push(
-      ...(await deps.logs.metric({ logql: build(i * SLICE_HOURS), at: now })),
+    slices.push(
+      await deps.logs.metric({ logql: build(i * SLICE_HOURS), at: now }),
     );
   }
-  return samples;
+  return slices;
 }
 
 function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
@@ -357,7 +360,12 @@ function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
 async function collectSnapshot(
   deps: OpsQueryDependencies,
   now: Date,
-): Promise<{ snapshot?: OpsSnapshot; failures: OpsFinding[] }> {
+): Promise<{
+  snapshot?: OpsSnapshot;
+  /** 直近 `RECENT_SLICES` 区間の件数を 24 時間ぶんに引き伸ばしたもの。 */
+  recentErrorCounts?: Record<string, number>;
+  failures: OpsFinding[];
+}> {
   // Loki は小さい構成なので、問い合わせは直列に投げる（並列にすると
   // `429 too many outstanding requests` で落ちる）。
   const run = (logql: string) => settle(deps.logs.metric({ logql, at: now }));
@@ -399,20 +407,34 @@ async function collectSnapshot(
     return { failures };
   }
 
-  const errorCounts = toCounts(errors.value, 'namespace');
-  for (const [key, count] of Object.entries(
-    toCounts(homeContainers.value, 'container_name'),
-  )) {
-    errorCounts[`${HOME_PREFIX}${key}`] = count;
-  }
-  for (const [key, count] of Object.entries(toJournalCounts(homeUnits.value))) {
-    errorCounts[`${HOME_PREFIX}${key}`] = count;
-  }
+  const assemble = (
+    pick: (slices: MetricSample[][]) => MetricSample[],
+  ): Record<string, number> => {
+    const counts = toCounts(pick(errors.value), 'namespace');
+    for (const [key, count] of Object.entries(
+      toCounts(pick(homeContainers.value), 'container_name'),
+    )) {
+      counts[`${HOME_PREFIX}${key}`] = count;
+    }
+    for (const [key, count] of Object.entries(
+      toJournalCounts(pick(homeUnits.value)),
+    )) {
+      counts[`${HOME_PREFIX}${key}`] = count;
+    }
+    return counts;
+  };
+  const scale = SLICE_COUNT / RECENT_SLICES;
+  const recentErrorCounts = Object.fromEntries(
+    Object.entries(
+      assemble((slices) => slices.slice(0, RECENT_SLICES).flat()),
+    ).map(([source, count]) => [source, count * scale]),
+  );
 
   return {
     failures,
+    recentErrorCounts,
     snapshot: {
-      errorCounts,
+      errorCounts: assemble((slices) => slices.flat()),
       clientIps: toCounts(ips.value, 'ip'),
       statusCounts: statusClassCounts(toCounts(statuses.value, 'status')),
     },
@@ -574,6 +596,35 @@ function capFindings(
  * 一部の問い合わせが落ちても見回りは続け、落ちたこと自体を項目にする
  * （INV-7）—— 収集が止まっているのに「異常なし」と言うのが最悪の壊れ方。
  */
+/**
+ * 前回の見回りで報告済みで、いまは収まっている急増を外す。24 時間の窓には
+ * 昨日の洪水の尻尾が残るので、そのまま判定すると同じ件を毎日知らせる。
+ * **まだ続いているものは、続いていると添えて出す。** 前回報告していないものは
+ * 収まっていても出す（知らせていないので）。
+ */
+function skipCalmedSurges(
+  deps: Pick<OpsReviewDependencies, 'store' | 'log'>,
+  surges: OpsFinding[],
+  recentErrorCounts: Readonly<Record<string, number>>,
+  history: readonly OpsSnapshot[],
+): OpsFinding[] {
+  const previous = deps.store.latest();
+  const reported = new Set(
+    previous?.status === 'completed' ? previous.findings.map((f) => f.id) : [],
+  );
+  const stillSurging = new Set(
+    compareErrorCounts(recentErrorCounts, history).map((f) => f.id),
+  );
+  const { kept, calmed } = settleReportedSurges(surges, reported, stillSurging);
+  if (calmed.length > 0) {
+    deps.log.info(
+      { sources: calmed },
+      'Skipped error surges that were reported last time and have calmed down',
+    );
+  }
+  return kept;
+}
+
 export async function runOpsReview(
   deps: OpsReviewDependencies,
   now: Date,
@@ -592,7 +643,12 @@ export async function runOpsReview(
   if (snapshot) {
     if (hasEnoughHistory(history)) {
       findings.push(
-        ...compareErrorCounts(snapshot.errorCounts, history),
+        ...skipCalmedSurges(
+          deps,
+          compareErrorCounts(snapshot.errorCounts, history),
+          collected.recentErrorCounts ?? {},
+          history,
+        ),
         ...compareClientIps(snapshot.clientIps, history),
       );
     } else {
