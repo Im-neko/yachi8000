@@ -14,6 +14,7 @@ import {
   type OpsSnapshot,
   overallSeverity,
   renderFindingsText,
+  settleReportedSurges,
   statusClassCounts,
 } from './ops.ts';
 
@@ -287,5 +288,27 @@ describe('formatJstWindow', () => {
         new Date('2026-10-15T16:00:00Z'),
       ),
     ).toBe('10-15 23:00〜10-16 01:00（JST）');
+  });
+});
+
+describe('settleReportedSurges', () => {
+  const surge = (source: string) => ({
+    id: `error-surge:${source}`,
+    severity: 'warning' as const,
+    title: 't',
+    detail: 'd',
+  });
+
+  it('報告済みで収まっていれば外し、続いていれば添え、未報告ならそのまま', () => {
+    const { kept, calmed } = settleReportedSurges(
+      [surge('a'), surge('b'), surge('c')],
+      new Set(['error-surge:a', 'error-surge:b']),
+      new Set(['error-surge:b']),
+    );
+
+    expect(calmed).toEqual(['error-surge:a']);
+    expect(kept.map((f) => f.id)).toEqual(['error-surge:b', 'error-surge:c']);
+    expect(kept[0]?.detail).toContain('いまも続いている');
+    expect(kept[1]?.detail).toBe('d');
   });
 });
