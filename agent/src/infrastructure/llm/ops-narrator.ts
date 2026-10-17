@@ -1,7 +1,10 @@
 import { maskSecrets } from '../../domain/ops.ts';
 import type { OpsNarrator } from '../../domain/ports/ops-narrator.ts';
 import type { SettingsProvider } from '../../domain/ports/settings-provider.ts';
-import { createChatCompleter } from './chat-completion.ts';
+import {
+  CompletionTooLongError,
+  createChatCompleter,
+} from './chat-completion.ts';
 
 /** Discord の 1 メッセージ（2000 字）から、見出しと注記の分を引いた本文の上限。 */
 const MAX_NARRATION_LENGTH = 1_500;
@@ -26,7 +29,7 @@ const SYSTEM_PROMPT = [
   '- evidence があれば、そのログが何を示していそうかを一言で読み解いてよい。**推測は「〜のようです」と推測だと分かる書き方にする**',
   '- 関連する項目（同じ namespace・同じ原因らしいもの）は 1 つにまとめて書いてよい',
   '- notes に制約（学習中など）があれば、末尾で一言触れる',
-  '- 箇条書きと短い文で、長くなりすぎないようにする。ログ行をそのまま貼らない',
+  `- 箇条書きと短い文で、全体を ${MAX_NARRATION_LENGTH - 300} 字以内に収める。項目が多い日は、関連をまとめ、細部を削る。ログ行をそのまま貼らない`,
   '- 報告の本文だけを出力する。前置き・見出し・引用符を付けない',
 ].join('\n');
 
@@ -62,13 +65,27 @@ export function createOpsNarrator(input: CreateOpsNarratorInput): OpsNarrator {
         notes: material.notes,
       };
 
-      return complete({
-        system: `${SYSTEM_PROMPT}\n\nあなたの話し方:\n一人称は「${persona.firstPerson}」。\n${persona.speechStyle}`,
-        // 材料は LLM に渡す前にも伏せる。ログ行に秘密が混じっていても、
-        // 外部のモデルへは出さない。
-        user: maskSecrets(JSON.stringify(data)),
-        maxLength: MAX_NARRATION_LENGTH,
-      });
+      const system = `${SYSTEM_PROMPT}\n\nあなたの話し方:\n一人称は「${persona.firstPerson}」。\n${persona.speechStyle}`;
+      // 材料は LLM に渡す前にも伏せる。ログ行に秘密が混じっていても、
+      // 外部のモデルへは出さない。
+      const user = maskSecrets(JSON.stringify(data));
+
+      try {
+        return await complete({
+          system,
+          user,
+          maxLength: MAX_NARRATION_LENGTH,
+        });
+      } catch (error) {
+        if (!(error instanceof CompletionTooLongError)) throw error;
+        // 項目が多い日は規則どおりに書くと溢れる。長さを伝えて 1 度だけ撮り直す。
+        // それでも溢れたら投げる（呼び出し側が事実の一覧へ縮退して WARN を出す）。
+        return complete({
+          system: `${system}\n\n前回の出力は ${error.length} 字で長すぎました。${MAX_NARRATION_LENGTH - 300} 字以内に、同じ項目を関連ごとにまとめて短く書き直してください。`,
+          user,
+          maxLength: MAX_NARRATION_LENGTH,
+        });
+      }
     },
   };
 }
