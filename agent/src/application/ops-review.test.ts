@@ -281,7 +281,10 @@ describe('runOpsReview', () => {
         'sum by (container_name)': [
           sample({ container_name: 'daytrade' }, 2000),
         ],
-        'sum by (unit)': [sample({ unit: 'ssh.service' }, 150)],
+        'sum by (unit)': [
+          sample({ unit: 'ssh.service' }, 150),
+          sample({}, 5_000_000),
+        ],
         'sum by (ip)': [sample({ ip: '192.0.2.1' }, 300)],
         'sum by (status)': [sample({ status: '200' }, 1000)],
       },
@@ -304,11 +307,13 @@ describe('runOpsReview', () => {
       app: 100,
       'home/daytrade': 2000,
       'home/ssh.service': 150,
+      'home/kernel': 5_000_000,
     });
     expect(record.findings.map((f) => f.id)).toEqual(
       expect.arrayContaining([
         'error-surge:home/daytrade',
         'error-surge:home/ssh.service',
+        'error-surge:home/kernel',
       ]),
     );
     // 代表行は、種類に合った家のセレクタで引く。
@@ -319,9 +324,41 @@ describe('runOpsReview', () => {
     ).toBe(true);
     expect(
       selectors.some((q) =>
-        q.startsWith('{site="home", job="journal", unit="ssh.service"}'),
+        q.startsWith('{site="home", job="journal", unit="ssh.service", '),
       ),
     ).toBe(true);
+    expect(
+      selectors.some((q) =>
+        q.startsWith('{site="home", job="journal", unit="", '),
+      ),
+    ).toBe(true);
+    // journal は本文を正規表現で読まない（洪水の翌日に時間切れで落ちる）。
+    expect(
+      selectors
+        .filter((q) => q.includes('job="journal"'))
+        .every((q) => !q.includes('|~')),
+    ).toBe(true);
+  });
+
+  it('journal の集計は優先度のラベルで絞り、本文の正規表現を使わない', async () => {
+    const queries: string[] = [];
+    const logs = createLogs();
+    const { deps } = createDeps({
+      logs: {
+        ...logs,
+        metric: async (query) => {
+          queries.push(query.logql);
+          return logs.metric(query);
+        },
+      },
+    });
+
+    await runOpsReview(deps, NOW);
+
+    const journal = queries.filter((q) => q.includes('job="journal"'));
+    expect(journal).toHaveLength(1);
+    expect(journal[0]).toContain('priority=~');
+    expect(journal[0]).not.toContain('|~');
   });
 
   it('初めて見るアクセス元を挙げる', async () => {

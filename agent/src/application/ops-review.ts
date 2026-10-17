@@ -66,8 +66,16 @@ const ERROR_COUNT_QUERY = `sum by (namespace) (count_over_time({namespace=~".+"}
  * 前置きして、クラスタの namespace と混ざらないようにする。
  */
 const HOME_CONTAINER_ERROR_QUERY = `sum by (container_name) (count_over_time({site="home", job="docker"} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` [24h]))`;
-const HOME_UNIT_ERROR_QUERY = `sum by (unit) (count_over_time({site="home", job="journal"} |~ \`${ERROR_WORDS}\` [24h]))`;
+/**
+ * journal は本文の正規表現でなく優先度のラベルで絞る。ログが洪水になった翌日、
+ * 24 時間ぶんの全行を正規表現で読むと問い合わせが時間切れで落ちる（7,000 万行で
+ * 57 秒）。ラベルでの絞り込みは行を読まない。
+ */
+const JOURNAL_PRIORITY = 'priority=~"warning|error|crit.*|alert|emerg.*"';
+const HOME_UNIT_ERROR_QUERY = `sum by (unit) (count_over_time({site="home", job="journal", ${JOURNAL_PRIORITY}} [24h]))`;
 const HOME_PREFIX = 'home/';
+/** `unit` ラベルの無い journal の行（カーネル・監査）の送信元名。 */
+const HOME_NO_UNIT = 'kernel';
 const SYSTEMD_UNIT = /\.(service|scope|socket|timer|mount)$/;
 
 const CLIENT_IP_QUERY = `topk(50, sum by (ip) (count_over_time(${INGRESS_SELECTOR} | regexp \`^(?P<ip>[0-9a-fA-F:.]+) - \` | ip != "" [24h])))`;
@@ -278,6 +286,18 @@ function toCounts(
   return counts;
 }
 
+/** journal の集計。`unit` の無い行は捨てずに `kernel` として数える。 */
+function toJournalCounts(
+  samples: readonly MetricSample[],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const sample of samples) {
+    const name = sample.labels.unit || HOME_NO_UNIT;
+    counts[name] = (counts[name] ?? 0) + Math.round(sample.value);
+  }
+  return counts;
+}
+
 function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
   return Promise.allSettled([promise]).then(
     ([result]) => result as PromiseSettledResult<T>,
@@ -337,9 +357,7 @@ async function collectSnapshot(
   )) {
     errorCounts[`${HOME_PREFIX}${key}`] = count;
   }
-  for (const [key, count] of Object.entries(
-    toCounts(homeUnits.value, 'unit'),
-  )) {
+  for (const [key, count] of Object.entries(toJournalCounts(homeUnits.value))) {
     errorCounts[`${HOME_PREFIX}${key}`] = count;
   }
 
@@ -353,13 +371,18 @@ async function collectSnapshot(
   };
 }
 
-/** 送信元の名前から、その代表行を引くログセレクタを作る。 */
-function selectorOf(source: string): string {
-  if (!source.startsWith(HOME_PREFIX)) return `{namespace="${source}"}`;
+/** 送信元の名前から、その代表的なエラー行を引くログクエリを作る。 */
+function evidenceQueryOf(source: string): string {
+  const words = `|~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\``;
+  if (!source.startsWith(HOME_PREFIX))
+    return `{namespace="${source}"} ${words}`;
   const name = source.slice(HOME_PREFIX.length);
+  if (name === HOME_NO_UNIT) {
+    return `{site="home", job="journal", unit="", ${JOURNAL_PRIORITY}}`;
+  }
   return SYSTEMD_UNIT.test(name)
-    ? `{site="home", job="journal", unit="${name}"}`
-    : `{site="home", job="docker", container_name="${name}"}`;
+    ? `{site="home", job="journal", unit="${name}", ${JOURNAL_PRIORITY}}`
+    : `{site="home", job="docker", container_name="${name}"} ${words}`;
 }
 
 const SAFE_SOURCE_NAME = /^(home\/)?[\w.@:-]+$/;
@@ -380,7 +403,7 @@ async function attachEvidence(
     if (!SAFE_SOURCE_NAME.test(source)) continue;
     try {
       const lines = await deps.logs.lines({
-        logql: `${selectorOf(source)} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\``,
+        logql: evidenceQueryOf(source),
         start: new Date(now.getTime() - WINDOW_MS),
         end: now,
         limit: EVIDENCE_FETCH_LINES,
