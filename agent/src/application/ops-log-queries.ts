@@ -77,3 +77,7 @@ export function surroundingQueryOf(source: string): string {
     ? '{site="home", job="journal"}'
     : `{site="home", job="docker", container_name="${name}"}`;
 }
+
+/** コントロールプレーンの etcd。遅い応答は `took too long` で記録される。 */
+export const ETCD_SELECTOR = '{namespace="kube-system",container="etcd"}';
+export const ETCD_SLOW_FILTER = '|= "took too long"';
