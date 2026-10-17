@@ -69,7 +69,10 @@ export function createWikiTools(deps: WikiDependencies) {
         [
           result.text,
           ...(result.truncated
-            ? [`…（長いため先頭の ${MAX_WIKI_PAGE_CHARS} 文字まで）`]
+            ? [
+                `…（長いため先頭の ${MAX_WIKI_PAGE_CHARS} 文字まで。` +
+                  '全文を読めていないので、update_wiki_page では書き換えず、足すだけなら append_to_wiki_page を使うこと）',
+              ]
             : []),
         ].join('\n'),
         WIKI_ORIGIN,
