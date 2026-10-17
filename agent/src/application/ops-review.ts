@@ -4,6 +4,7 @@ import {
   compareClientIps,
   compareErrorCounts,
   compareStatusMix,
+  formatJstWindow,
   groupLogPatterns,
   hasEnoughHistory,
   isReviewDue,
@@ -47,7 +48,8 @@ const MAX_FINDINGS_PER_KIND = 8;
 export const MAX_QUERY_MINUTES = 24 * 60;
 export const MAX_QUERY_LINES = 100;
 
-const WINDOW_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const WINDOW_MS = 24 * HOUR_MS;
 
 /**
  * ここにあるクエリは**この基盤のログの形を知っている**。ingress の
@@ -59,20 +61,45 @@ const ERROR_WORDS = '(?i)(\\b(error|err|fatal|panic)\\b|oomkill)';
 const ACCESS_LINE = '^[0-9a-fA-F:.]+ - \\S+ \\[';
 const INGRESS_SELECTOR = '{namespace="ingress-nginx"}';
 
-const ERROR_COUNT_QUERY = `sum by (namespace) (count_over_time({namespace=~".+"} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` [24h]))`;
+/**
+ * スタックトレース・レジスタダンプ・カーネルの警告の本体など、**1 件の出来事の
+ * 2 行目以降**。1 行ずつ数えると、例外 1 件が 30 行に、カーネルの警告 1 件が 64 行に
+ * 化けて、倍率が桁違いに跳ねる。先頭の行（見出し・例外の本題）だけを数える。
+ * CRI の前置き（`<時刻> stderr F `）が付いた形も同じに扱う。
+ */
+export const CONTINUATION_LINE = String.raw`^(\S+ std(?:out|err) [FP] )?(\s|(?:RIP|RSP|RAX|RBX|RCX|RDX|RSI|RDI|RBP|R[0-9]+|FS|GS|CS|CR[0-9]|DR[0-9]|Code|CPU|Hardware name|Modules linked in|Tainted|Call Trace|PKRU)[: ]|-+\[ (?:cut here|end trace)|</?(?:TASK|IRQ)>|(?:\[[^\]]*\]\s+)?(?:--- End of inner|--->|#{5,})|\[[^\]]*\]\s+at )`;
+const NOT_CONTINUATION = `!~ \`${CONTINUATION_LINE}\``;
+
+/**
+ * 24 時間を `SLICE_HOURS` ごとに分けて問い合わせる（`offset` が区間の位置）。
+ * Loki は 30 秒ほどで応答を切るので、一括で投げると、中身が合っていても受け取れない。
+ */
+const SLICE_HOURS = 2;
+const SLICE_COUNT = 24 / SLICE_HOURS;
+const sliceRange = (offsetHours: number) =>
+  `[${SLICE_HOURS}h] offset ${offsetHours}h`;
+
+function errorCountQuery(offsetHours: number): string {
+  return `sum by (namespace) (count_over_time({namespace=~".+"} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` ${NOT_CONTINUATION} ${sliceRange(offsetHours)}))`;
+}
 /**
  * 家のログ（Alloy が `site="home"` を付けて送ってくる）。Docker は
  * `container_name`、journal は `unit` で分ける。送信元の名前は `home/` を
  * 前置きして、クラスタの namespace と混ざらないようにする。
  */
-const HOME_CONTAINER_ERROR_QUERY = `sum by (container_name) (count_over_time({site="home", job="docker"} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` [24h]))`;
+function homeContainerErrorQuery(offsetHours: number): string {
+  return `sum by (container_name) (count_over_time({site="home", job="docker"} |~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` ${NOT_CONTINUATION} ${sliceRange(offsetHours)}))`;
+}
 /**
- * journal は本文の正規表現でなく優先度のラベルで絞る。ログが洪水になった翌日、
- * 24 時間ぶんの全行を正規表現で読むと問い合わせが時間切れで落ちる（7,000 万行で
- * 57 秒）。ラベルでの絞り込みは行を読まない。
+ * journal は優先度のラベルで絞る。本文の正規表現だけで 24 時間ぶんを読むと、
+ * ログが洪水になった翌日（7,000 万行）に問い合わせが遅すぎて落ちる。
  */
 const JOURNAL_PRIORITY = 'priority=~"warning|error|crit.*|alert|emerg.*"';
-const HOME_UNIT_ERROR_QUERY = `sum by (unit) (count_over_time({site="home", job="journal", ${JOURNAL_PRIORITY}} [24h]))`;
+const JOURNAL_SELECTOR = `{site="home", job="journal", ${JOURNAL_PRIORITY}}`;
+
+function journalErrorQuery(offsetHours: number): string {
+  return `sum by (unit) (count_over_time(${JOURNAL_SELECTOR} ${NOT_CONTINUATION} ${sliceRange(offsetHours)}))`;
+}
 const HOME_PREFIX = 'home/';
 /** `unit` ラベルの無い journal の行（カーネル・監査）の送信元名。 */
 const HOME_NO_UNIT = 'kernel';
@@ -298,6 +325,25 @@ function toJournalCounts(
   return counts;
 }
 
+/**
+ * 24 時間を `SLICE_HOURS` ごとに分けて直列に問い合わせ、サンプルを寄せ集める。
+ * どれか 1 本でも取れなかったら投げる（欠けた区間を「0 件」にしない）。
+ * `build` には、その区間の `offset`（時間）を渡す。
+ */
+async function collectSliced(
+  deps: OpsQueryDependencies,
+  now: Date,
+  build: (offsetHours: number) => string,
+): Promise<MetricSample[]> {
+  const samples: MetricSample[] = [];
+  for (let i = 0; i < SLICE_COUNT; i++) {
+    samples.push(
+      ...(await deps.logs.metric({ logql: build(i * SLICE_HOURS), at: now })),
+    );
+  }
+  return samples;
+}
+
 function settle<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>> {
   return Promise.allSettled([promise]).then(
     ([result]) => result as PromiseSettledResult<T>,
@@ -315,9 +361,11 @@ async function collectSnapshot(
   // Loki は小さい構成なので、問い合わせは直列に投げる（並列にすると
   // `429 too many outstanding requests` で落ちる）。
   const run = (logql: string) => settle(deps.logs.metric({ logql, at: now }));
-  const errors = await run(ERROR_COUNT_QUERY);
-  const homeContainers = await run(HOME_CONTAINER_ERROR_QUERY);
-  const homeUnits = await run(HOME_UNIT_ERROR_QUERY);
+  const errors = await settle(collectSliced(deps, now, errorCountQuery));
+  const homeContainers = await settle(
+    collectSliced(deps, now, homeContainerErrorQuery),
+  );
+  const homeUnits = await settle(collectSliced(deps, now, journalErrorQuery));
   const ips = await run(CLIENT_IP_QUERY);
   const statuses = await run(STATUS_QUERY);
 
@@ -371,21 +419,56 @@ async function collectSnapshot(
   };
 }
 
+const SAFE_SOURCE_NAME = /^(home\/)?[\w.@:-]+$/;
+
 /** 送信元の名前から、その代表的なエラー行を引くログクエリを作る。 */
 function evidenceQueryOf(source: string): string {
-  const words = `|~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\``;
+  const words = `|~ \`${ERROR_WORDS}\` !~ \`${ACCESS_LINE}\` ${NOT_CONTINUATION}`;
   if (!source.startsWith(HOME_PREFIX))
     return `{namespace="${source}"} ${words}`;
   const name = source.slice(HOME_PREFIX.length);
   if (name === HOME_NO_UNIT) {
-    return `{site="home", job="journal", unit="", ${JOURNAL_PRIORITY}}`;
+    return `{site="home", job="journal", unit="", ${JOURNAL_PRIORITY}} ${NOT_CONTINUATION}`;
   }
   return SYSTEMD_UNIT.test(name)
-    ? `{site="home", job="journal", unit="${name}", ${JOURNAL_PRIORITY}}`
+    ? `{site="home", job="journal", unit="${name}", ${JOURNAL_PRIORITY}} ${NOT_CONTINUATION}`
     : `{site="home", job="docker", container_name="${name}"} ${words}`;
 }
 
-const SAFE_SOURCE_NAME = /^(home\/)?[\w.@:-]+$/;
+/**
+ * その送信元のエラー行が**いちばん多かった区間**を返す。直近の行だけを引くと、
+ * 洪水が終わった後の平常の行が代表になってしまう（原因は区間の前にある）。
+ * 数えても 1 件も無ければ、24 時間ぜんぶを区間として返す。
+ */
+async function findPeakWindow(
+  deps: OpsQueryDependencies,
+  logql: string,
+  now: Date,
+): Promise<{ start: Date; end: Date; narrowed: boolean }> {
+  let peak = { offset: 0, count: 0 };
+  for (let i = 0; i < SLICE_COUNT; i++) {
+    const offset = i * SLICE_HOURS;
+    const samples = await deps.logs.metric({
+      logql: `sum(count_over_time(${logql} ${sliceRange(offset)}))`,
+      at: now,
+    });
+    const count = samples.reduce((sum, sample) => sum + sample.value, 0);
+    if (count > peak.count) peak = { offset, count };
+  }
+  if (peak.count === 0) {
+    return {
+      start: new Date(now.getTime() - WINDOW_MS),
+      end: now,
+      narrowed: false,
+    };
+  }
+  const end = new Date(now.getTime() - peak.offset * HOUR_MS);
+  return {
+    start: new Date(end.getTime() - SLICE_HOURS * HOUR_MS),
+    end,
+    narrowed: true,
+  };
+}
 
 /** 急増した送信元の、代表的なエラー行を付ける。取れなくても項目は残す。 */
 async function attachEvidence(
@@ -402,16 +485,23 @@ async function attachEvidence(
     const source = finding.id.slice('error-surge:'.length);
     if (!SAFE_SOURCE_NAME.test(source)) continue;
     try {
+      const logql = evidenceQueryOf(source);
+      const window = await findPeakWindow(deps, logql, now);
       const lines = await deps.logs.lines({
-        logql: evidenceQueryOf(source),
-        start: new Date(now.getTime() - WINDOW_MS),
-        end: now,
+        logql,
+        start: window.start,
+        end: window.end,
         limit: EVIDENCE_FETCH_LINES,
       });
       finding.evidence = groupLogPatterns(
         lines.map((l) => l.line),
         EVIDENCE_PATTERNS,
       ).map(({ pattern, count }) => `${count}× ${pattern}`);
+      if (window.narrowed) {
+        finding.evidence.push(
+          `（代表行は、エラーがいちばん多かった ${formatJstWindow(window.start, window.end)} のもの）`,
+        );
+      }
     } catch (error) {
       notes.push(
         `${source} の代表的なエラー行を取れなかった（${(error as Error).message}）`,

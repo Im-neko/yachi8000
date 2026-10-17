@@ -8,6 +8,7 @@ import type {
 } from '../domain/ports/ops-review-store.ts';
 import type { Settings } from '../domain/settings.ts';
 import {
+  CONTINUATION_LINE,
   checkClusterHealth,
   composeReviewMessage,
   MAX_QUERY_LINES,
@@ -67,6 +68,9 @@ function createLogs(
 ): LogSource {
   return {
     metric: async ({ logql }) => {
+      // 24 時間は 2 時間ごとの区間に分けて問い合わせるので、最初の区間にだけ答える。
+      if (logql.includes('] offset ') && !logql.includes('offset 0h'))
+        return [];
       for (const [key, value] of Object.entries(metric)) {
         if (!logql.includes(key)) continue;
         if (value instanceof Error) throw value;
@@ -340,7 +344,7 @@ describe('runOpsReview', () => {
     ).toBe(true);
   });
 
-  it('journal の集計は優先度のラベルで絞り、本文の正規表現を使わない', async () => {
+  it('journal の集計は優先度のラベルで絞り、2 時間ごとの 12 本に分けて足し合わせる', async () => {
     const queries: string[] = [];
     const logs = createLogs();
     const { deps } = createDeps({
@@ -348,17 +352,133 @@ describe('runOpsReview', () => {
         ...logs,
         metric: async (query) => {
           queries.push(query.logql);
+          if (
+            query.logql.includes('job="journal"') &&
+            query.logql.includes('offset')
+          ) {
+            return [sample({ unit: 'ssh.service' }, 10), sample({}, 100)];
+          }
           return logs.metric(query);
         },
       },
     });
 
-    await runOpsReview(deps, NOW);
+    const record = await runOpsReview(deps, NOW);
 
+    // クラスタ全体・家のコンテナも同じく 12 本に分ける。
+    expect(
+      queries.filter((q) => q.includes('sum by (namespace)')),
+    ).toHaveLength(12);
+    expect(
+      queries.filter((q) => q.includes('sum by (container_name)')),
+    ).toHaveLength(12);
     const journal = queries.filter((q) => q.includes('job="journal"'));
-    expect(journal).toHaveLength(1);
-    expect(journal[0]).toContain('priority=~');
-    expect(journal[0]).not.toContain('|~');
+    expect(journal).toHaveLength(12);
+    expect(journal.every((q) => q.includes('priority=~'))).toBe(true);
+    expect(journal.every((q) => q.includes('[2h] offset'))).toBe(true);
+    expect(journal.some((q) => q.includes('offset 22h'))).toBe(true);
+    // 本文の「エラー」を探す正規表現は使わない（洪水の日に遅くなる）。
+    expect(journal.every((q) => !q.includes('(?i)'))).toBe(true);
+    expect(record.snapshot?.errorCounts).toMatchObject({
+      'home/ssh.service': 120,
+      'home/kernel': 1200,
+    });
+  });
+
+  it('journal の区間が 1 本でも取れなければ、その確認の失敗を挙げて基準に残さない', async () => {
+    const logs = createLogs();
+    let calls = 0;
+    const { deps } = createDeps({
+      logs: {
+        ...logs,
+        metric: async (query) => {
+          if (query.logql.includes('job="journal"') && ++calls === 5) {
+            throw new Error('ログの集計に失敗しました: 500');
+          }
+          return logs.metric(query);
+        },
+      },
+    });
+
+    const record = await runOpsReview(deps, NOW);
+
+    expect(record.snapshot).toBeUndefined();
+    expect(record.findings.map((f) => f.id)).toContain(
+      'check-failed:log-home-units',
+    );
+  });
+
+  it('代表行は、エラーがいちばん多かった区間から取る', async () => {
+    const lineRanges: Array<{ start: Date; end: Date }> = [];
+    const logs = createLogs({
+      'sum by (namespace)': [sample({ namespace: 'app' }, 1500)],
+      'sum by (ip)': [sample({ ip: '192.0.2.1' }, 300)],
+      'sum by (status)': [sample({ status: '200' }, 1000)],
+    });
+    const { deps } = createDeps({
+      store: createFakeStore(fiveQuietDays()),
+      logs: {
+        metric: async (query) => {
+          // 4 区間前（8〜6 時間前）だけが多かった。
+          if (query.logql.startsWith('sum(count_over_time(')) {
+            return [sample({}, query.logql.includes('offset 6h') ? 900 : 5)];
+          }
+          return logs.metric(query);
+        },
+        lines: async (query) => {
+          lineRanges.push({ start: query.start, end: query.end });
+          return [
+            {
+              timestamp: '1',
+              labels: {},
+              line: 'connect() failed to 10.0.0.1:80',
+            },
+          ];
+        },
+      },
+    });
+
+    const record = await runOpsReview(deps, NOW);
+
+    const surge = record.findings.find((f) => f.id === 'error-surge:app');
+    expect(lineRanges[0]?.end.toISOString()).toBe('2026-10-11T18:00:00.000Z');
+    expect(lineRanges[0]?.start.toISOString()).toBe('2026-10-11T16:00:00.000Z');
+    expect(surge?.evidence?.at(-1)).toContain('10-12 01:00〜03:00（JST）');
+  });
+
+  it('継続行（スタックトレースやレジスタダンプ）を除き、見出しの行は数える', () => {
+    const continuation = new RegExp(CONTINUATION_LINE);
+    for (const line of [
+      '   at System.Net.Sockets.Socket.Send()',
+      '[RUNNER 2026-10-17 00:32:41Z ERR  BrokerServer]    at System.Threading.Tasks',
+      '2026-10-16T10:08:07.206Z stderr F   File "/app/main.py", line 3',
+      ' ? srso_return_thunk+0x5/0x5f',
+      'RIP: 0010:sysfs_emit_at+0x61/0xd0',
+      'R10: 0000000000000000 R11: 0000000000000000',
+      'Call Trace:',
+      ' <IRQ>',
+      '------------[ cut here ]------------',
+      '---[ end trace 0000000000000000 ]---',
+      'Modules linked in: smsdvb dvb_core',
+      'Hardware name: Gigabyte Technology Co., Ltd. B450',
+      '--- End of inner exception stack trace ---',
+      '[RUNNER 2026-10-17 00:32:41Z ERR  BrokerServer] --- End of inner exception stack trace ---',
+      '2026-10-17T00:32:41Z stdout F [RUNNER 2026-10-17 00:32:41Z ERR  BrokerServer] ---> System.Net.Sockets.SocketException (125): Operation canceled',
+      '[RUNNER 2026-10-17 00:32:41Z ERR  BrokerServer] #####################################################',
+    ]) {
+      expect(continuation.test(line), line).toBe(true);
+    }
+    for (const line of [
+      'WARNING: fs/sysfs/file.c:781 at sysfs_emit_at+0x59/0xd0',
+      'invalid sysfs_emit_at: buf:00000000601d32f6 at:0',
+      '[RUNNER 2026-10-17 00:32:41Z ERR  BrokerServer] System.Net.Http.HttpRequestException: connection reset',
+      'Traceback (most recent call last):',
+      'level=error msg="failed to connect"',
+      '2026-10-16T10:08:07.206Z stderr F Error doing the fallback: x',
+      'CPUs online: 8',
+    ]) {
+      expect(continuation.test(line), line).toBe(false);
+    }
   });
 
   it('初めて見るアクセス元を挙げる', async () => {
