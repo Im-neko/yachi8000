@@ -131,6 +131,14 @@ const EnvSchema = v.object({
   LOKI_URL: v.optional(v.pipe(v.string(), v.url())),
   PROMETHEUS_URL: v.optional(v.pipe(v.string(), v.url())),
 
+  /**
+   * 社内 wiki（Wiki.js）の読み取り口（F-55）。ベース URL と、読むだけに使う API キー。
+   * **2 つ揃ったときだけ動く。** 片方だけ渡すのは設定ミスなので起動時に落とす。
+   * どちらも無ければ wiki の道具が無いだけで、会話は動く（起動ログに WARN が 1 行）。
+   */
+  WIKIJS_URL: v.optional(v.pipe(v.string(), v.url())),
+  WIKIJS_TOKEN: v.optional(v.pipe(v.string(), v.minLength(1))),
+
   /** Flue の会話履歴 SQLite。k8s では PVC 上のパスを渡す。 */
   FLUE_DB_PATH: v.optional(
     v.pipe(v.string(), v.minLength(1)),
@@ -181,6 +189,13 @@ function loadEnv(): Env {
   ) {
     throw new Error(
       'LOKI_URL と PROMETHEUS_URL は両方渡すか、両方渡さないかのどちらかです。片方だけだと見回りが半分の情報で「異常なし」と言ってしまうため起動を中止します。',
+    );
+  }
+  if (
+    Boolean(result.output.WIKIJS_URL) !== Boolean(result.output.WIKIJS_TOKEN)
+  ) {
+    throw new Error(
+      'WIKIJS_URL と WIKIJS_TOKEN は両方渡すか、両方渡さないかのどちらかです。片方だけだと wiki を引けないまま道具だけが生えるため起動を中止します。',
     );
   }
   if (result.output.ENVIRONMENT === 'production' && result.output.DEBUG_MODE) {
