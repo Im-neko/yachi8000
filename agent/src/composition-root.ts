@@ -32,6 +32,7 @@ import {
 import type { VoiceInputDependencies } from './application/voice-input.ts';
 import type { VoiceSessionDependencies } from './application/voice-session.ts';
 import type { WebSearchDependencies } from './application/web-search.ts';
+import type { WikiDependencies } from './application/wiki.ts';
 import { env } from './config/env.ts';
 import { configuredGestures } from './domain/avatar.ts';
 import type { IssueTracker } from './domain/ports/issue-tracker.ts';
@@ -67,6 +68,7 @@ import {
 import { createSqliteSkillStore } from './infrastructure/skill/sqlite-skill-store.ts';
 import { createWhisperTranscriber } from './infrastructure/stt/whisper-transcriber.ts';
 import { createVoicevoxSynthesizer } from './infrastructure/voice/voicevox-synthesizer.ts';
+import { createWikiJsSource } from './infrastructure/wiki/wikijs-source.ts';
 import { logger } from './observability/logger.ts';
 
 /**
@@ -161,6 +163,29 @@ export const channelHistoryDependencies: ChannelHistoryDependencies = {
 };
 
 const opsQueries = createOpsQueryDependencies();
+
+/**
+ * 社内 wiki の読み取り口（F-55）。**URL とキーが揃っていなければ作らない。**
+ * 道具を配らないので、会話の中では「そんな道具は無い」ことになり、
+ * 気付く手がかりは起動ログの 1 行だけ。
+ */
+function createWikiDependencies(): WikiDependencies | undefined {
+  if (!env.WIKIJS_URL || !env.WIKIJS_TOKEN) {
+    logger.warn(
+      {},
+      'The wiki tools are disabled — WIKIJS_URL / WIKIJS_TOKEN are not set (no search_wiki, no read_wiki_page)',
+    );
+    return undefined;
+  }
+  return {
+    wiki: createWikiJsSource({
+      baseUrl: env.WIKIJS_URL,
+      apiKey: env.WIKIJS_TOKEN,
+    }),
+  };
+}
+
+export const wikiDependencies = createWikiDependencies();
 
 /** チャットから調べる道具が使う側。見回りの配信は poller 側の配線で足す。 */
 export const opsToolDependencies: OpsToolDependencies | undefined = opsQueries

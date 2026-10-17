@@ -25,6 +25,7 @@ agent が受け取るのは接続情報だけ:
 | `DISCORD_BOT_TOKEN` / `LLM_PROXY_API_KEY` / `NOTIFY_TOKENS` / `MEMORY_DATABASE_URL` / **`BRAVE_SEARCH_API_KEY`** | Sealed Secret |
 | `GITHUB_TOKEN` / `JEV_API_KEY`（どちらも任意） | Sealed Secret |
 | `LOKI_URL` / `PROMETHEUS_URL`（**2 つ揃えて渡す**。任意） | チャートの values（クラスタ内の ClusterIP。認証情報は無い） |
+| `WIKIJS_URL` / `WIKIJS_TOKEN`（**2 つ揃えて渡す**。任意。F-55） | URL はチャートの values（クラスタ内の Service）、`WIKIJS_TOKEN` は Sealed Secret（Wiki.js の読み取り用 API キー） |
 
 **話者 ID・話速・音高は環境変数に入れない。** 設定ファイル（`/data/settings.yaml`）側（F-60）。
 

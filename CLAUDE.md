@@ -239,6 +239,7 @@ agent/           Flue アプリ本体（TypeScript）
       reaction/        Jev（型付きの判断モデル）で表情と身振りを判断する（→ D-41, D-42）
       settings/        設定ファイルの読み書き
       voice/           VOICEVOX 互換エンジンのクライアント
+      wiki/            社内 wiki（Wiki.js）の読み取りクライアント（F-55）
     interfaces/        入口と表示整形（discord/ = メッセージ処理とスラッシュコマンド、http/ = 通知 API とデバッグ用ルート）
     agents/            Flue の `'use agent'` エージェント定義と 1 ターンの実行
       yachi.agent.ts     会話する本体
